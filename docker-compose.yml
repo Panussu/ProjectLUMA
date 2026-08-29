@@ -1,0 +1,56 @@
+services:
+  ai-engine:
+    build: ./ai-engine
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-local-development-service-token}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5000
+      SECRET_KEY: ${SECRET_KEY:-local-development-secret}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-jwt-secret}
+      AI_SERVICE_URL: http://ai-engine:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-local-development-service-token}
+      DATABASE_URL: sqlite:////data/luma.db
+      DATA_ROOT: /data
+      MEDIA_ROOT: /media
+      CORS_ORIGINS: http://localhost
+    volumes:
+      - luma-data:/data
+      - luma-media:/media
+    expose:
+      - "5000"
+    depends_on:
+      ai-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  luma-data:
+  luma-media:
+
