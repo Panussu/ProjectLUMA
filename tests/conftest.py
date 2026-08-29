@@ -28,9 +28,13 @@ def load_ai_module():
 
 
 @pytest.fixture()
-def ai_app():
-    module = load_ai_module()
-    return module.create_app({"TESTING": True, "SERVICE_TOKEN": "test-service-token"})
+def ai_module():
+    return load_ai_module()
+
+
+@pytest.fixture()
+def ai_app(ai_module):
+    return ai_module.create_app({"TESTING": True, "SERVICE_TOKEN": "test-service-token"})
 
 
 @pytest.fixture()
