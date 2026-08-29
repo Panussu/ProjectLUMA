@@ -78,7 +78,9 @@ Requirements: Python 3.11 or newer. Nginx is optional for local development.
    Copy-Item ai-engine/.env.example ai-engine/.env
    ```
 
-2. Start the AI service, backend, and frontend in separate PowerShell terminals.
+2. In Stability Matrix, launch Stable Diffusion WebUI Forge with `--api --port 7860`. For testing without Forge, change `AI_PROVIDER` in `ai-engine/.env` to `development-procedural`.
+
+3. Start the LUMA AI wrapper, backend, and frontend in separate PowerShell terminals.
 
    ```powershell
    ./scripts/run-ai.ps1
@@ -86,7 +88,7 @@ Requirements: Python 3.11 or newer. Nginx is optional for local development.
    ./scripts/run-frontend.ps1
    ```
 
-3. Open `http://localhost:8080`.
+4. Open `http://localhost:8080`.
 
 For local development, the frontend development server sends API requests to `http://localhost:5000`. In the deployed system, Nginx provides one public origin and forwards the requests.
 
@@ -116,7 +118,9 @@ The remote repository contains `Frontend`, `Backend`, `AiEngine`, `Routing`, and
 
 ## Current AI provider
 
-The included AI service uses a lightweight procedural provider so the complete distributed system works without downloading a large model or requiring a GPU. It is clearly marked as a development provider. The service boundary is ready for a real Forge AI, Stable Diffusion, or other model adapter without changing the browser or backend contract.
+The normal provider is Stable Diffusion WebUI Forge installed and launched through Stability Matrix. The LUMA AI wrapper converts the stable `/v1/generate` and `/v1/edit` contract into Forge `/sdapi/v1/txt2img` and `/sdapi/v1/img2img` requests.
+
+A lightweight procedural provider remains available for development, automated tests, and Docker demonstrations without a GPU. It is not a trained generative model and must not be presented as one.
 
 ## Security notes
 
