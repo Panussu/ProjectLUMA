@@ -29,7 +29,27 @@ Test-NetConnection 192.168.1.30 -Port 8000
 
 ### 2. AI computer
 
-Copy `ai-engine`, create its `.env`, set `HOST=0.0.0.0`, and start it with `scripts/run-ai.ps1`. Allow inbound TCP port 8000 only from the backend computer.
+Install Stability Matrix, then use it to install the Stable Diffusion WebUI Forge package and the required checkpoint model.
+
+In the Forge package launch options, add:
+
+```text
+--api --port 7860
+```
+
+Do not add `--listen` when Forge and the LUMA AI wrapper run on the same computer. This keeps the unwrapped Forge API private on `127.0.0.1`. After launching Forge, open `http://127.0.0.1:7860/docs` on the AI computer and confirm that `/sdapi/v1/txt2img` and `/sdapi/v1/img2img` are present.
+
+Copy `ai-engine`, create its `.env`, and set:
+
+```text
+HOST=0.0.0.0
+PORT=8000
+AI_PROVIDER=forge
+FORGE_URL=http://127.0.0.1:7860
+FORGE_CHECKPOINT=the-exact-checkpoint-name-shown-in-Forge
+```
+
+The `FORGE_CHECKPOINT` setting can remain empty to use the model currently selected in Forge. Start the wrapper with `scripts/run-ai.ps1`. Allow inbound TCP port 8000 only from the backend computer. Do not open Forge port 7860 in Windows Firewall.
 
 ### 3. Backend computer
 
@@ -46,8 +66,8 @@ Install Nginx, copy `frontend` to its static web root, and adapt the paths in `n
 3. Submit a generation prompt.
 4. Confirm the job moves through `queued`, `processing`, and `completed`.
 5. Confirm the result image appears and is present on the backend computer.
-6. Stop the AI service and confirm health reports it as unavailable.
-7. Restart the AI service and retry.
+6. Stop Forge and confirm the LUMA health endpoint reports the AI provider as unavailable.
+7. Restart Forge and retry.
 
 ## Database choice
 
