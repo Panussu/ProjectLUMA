@@ -1,0 +1,12 @@
+.git
+.github
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.env
+backend/data
+backend/media
+ai-engine/output
+tests
+docs
+
