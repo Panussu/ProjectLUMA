@@ -13,5 +13,16 @@ Copy-Item .env.example .env
 
 SQLite is created automatically under `backend/data`. Set `DATABASE_URL` to move to PostgreSQL.
 
+## PC 3 on the classroom VLAN
+
+For the three-computer demonstration, PC 3 runs Flask and owns the SQLite database, uploaded images, and generated results. Start from the VLAN example:
+
+```powershell
+Copy-Item .env.vlan.example .env
+python run.py
+```
+
+Confirm the three addresses with `ipconfig` before editing `.env`. The proposed topology is Nginx on `192.168.1.10`, Flask on `192.168.1.20:5000`, and the FastAPI AI wrapper on `192.168.1.30:8000`. The `AI_SERVICE_TOKEN` value must exactly match PC 1. Allow inbound TCP port `5000` from PC 2.
+
 The first version uses an in-process thread pool for jobs. Run one backend process for the classroom demonstration. For multiple backend processes, replace it with a shared queue such as Celery or RQ before scaling.
 
