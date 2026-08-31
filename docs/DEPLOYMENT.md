@@ -49,7 +49,7 @@ FORGE_URL=http://127.0.0.1:7860
 FORGE_CHECKPOINT=the-exact-checkpoint-name-shown-in-Forge
 ```
 
-The `FORGE_CHECKPOINT` setting can remain empty to use the model currently selected in Forge. Start the wrapper with `scripts/run-ai.ps1`. Allow inbound TCP port 8000 only from the backend computer. Do not open Forge port 7860 in Windows Firewall.
+The `FORGE_CHECKPOINT` setting can remain empty to use the model currently selected in Forge. Start the FastAPI wrapper with `scripts/run-ai.ps1`; the script launches Uvicorn through `ai-engine/app.py`. Open `http://127.0.0.1:8000/docs` locally to inspect its API. Allow inbound TCP port 8000 only from the backend computer. Do not open Forge port 7860 in Windows Firewall.
 
 ### 3. Backend computer
 
