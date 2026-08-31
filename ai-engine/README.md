@@ -1,6 +1,6 @@
 # LUMA AI Engine
 
-This private Flask service implements the image-provider boundary used by the LUMA backend. Its normal provider is Stable Diffusion WebUI Forge installed and launched through Stability Matrix.
+This private FastAPI service implements the image-provider boundary used by the LUMA backend. Its normal provider is Stable Diffusion WebUI Forge installed and launched through Stability Matrix.
 
 ## Stability Matrix and Forge
 
@@ -11,6 +11,8 @@ This private Flask service implements the image-provider boundary used by the LU
 5. Copy `.env.example` to `.env`, use `AI_PROVIDER=forge`, and start this wrapper on port 8000.
 
 The wrapper translates LUMA requests into Forge's API format, decodes the Base64 response, and returns a PNG to the backend. If Forge uses `--api-auth`, set `FORGE_USERNAME` and `FORGE_PASSWORD` in `.env`.
+
+After starting the wrapper, open `http://127.0.0.1:8000/docs` on the AI computer to inspect and test the FastAPI endpoints. Private requests still require the service token.
 
 ## Development provider
 
