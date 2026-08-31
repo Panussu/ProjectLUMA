@@ -1,14 +1,14 @@
 # Project LUMA
 
-LUMA (Learning-based Universal Media Artist) is a distributed web application for creating and editing images through an AI service. The project is designed for a small team and can run across three computers on the same local network.
+LUMA (Learning-based Universal Media Artist) is a distributed web application for creating and editing images through an AI service. The classroom deployment runs across three computers on the same VLAN.
 
 ## Architecture
 
 | Computer | Default address | Responsibilities |
 | --- | --- | --- |
-| Frontend | `192.168.1.10` | Nginx reverse proxy and static HTML/CSS/JavaScript |
-| Backend | `192.168.1.20` | Flask API, authentication, job queue, image storage, and database |
-| AI server | `192.168.1.30` | Image generation and editing service |
+| PC 2: Frontend | `192.168.1.10` | Nginx reverse proxy and static HTML/CSS/JavaScript |
+| PC 3: Backend | `192.168.1.20` | Flask API, authentication, job queue, image storage, and SQLite |
+| PC 1: AI server | `192.168.1.30` | FastAPI wrapper plus WebUI Forge on localhost |
 
 All addresses and ports are configurable. For local development, every service can run on one computer.
 
@@ -100,15 +100,17 @@ docker compose up --build
 
 Open `http://localhost`. Runtime data is stored in Docker volumes.
 
-## Three-computer deployment
+## Three-computer same-VLAN deployment
 
-1. Give each computer a stable LAN address or DHCP reservation.
-2. Run the frontend and Nginx on `192.168.1.10`.
-3. Run the Flask backend on `192.168.1.20:5000`.
-4. Run the AI service on `192.168.1.30:8000`.
-5. Allow only the required ports through each computer's firewall.
-6. Change `SECRET_KEY`, `JWT_SECRET_KEY`, and `AI_SERVICE_TOKEN` before deployment.
-7. Test the complete browser-to-AI flow from a different computer.
+All three computers must be connected to the same trusted classroom VLAN. The `192.168.1.x` addresses are proposed defaults; confirm and replace them using `ipconfig`. This profile does not require Tailscale, public IP addresses, or router port forwarding.
+
+1. On PC 1, copy `ai-engine/.env.vlan.example` to `ai-engine/.env`, start Forge, and run FastAPI on port `8000`.
+2. On PC 3, copy `backend/.env.vlan.example` to `backend/.env`, run Flask on port `5000`, and keep SQLite on that computer.
+3. On PC 2, serve the frontend through Nginx on port `80` and route `/api` and `/media` to PC 3.
+4. Use the same `AI_SERVICE_TOKEN` on PC 1 and PC 3.
+5. Allow only the required connections through Windows Firewall: PC 3 to PC 1 port `8000`, PC 2 to PC 3 port `5000`, and classroom clients to PC 2 port `80`.
+6. Start services in order: Forge, FastAPI, Flask, then Nginx.
+7. Run the acceptance checks in `docs/TEST_PLAN.md` before the demonstration.
 
 Detailed steps are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
