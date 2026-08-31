@@ -112,7 +112,7 @@ All three computers must be connected to the same trusted classroom VLAN. The `1
 6. Start services in order: Forge, FastAPI, Flask, then Nginx.
 7. Run the acceptance checks in `docs/TEST_PLAN.md` before the demonstration.
 
-Detailed steps are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Use [PROJECTLUMA_3PC_TEST_GUIDE.md](PROJECTLUMA_3PC_TEST_GUIDE.md) as the standalone setup and test checklist to share with group members. Additional deployment notes are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Branch ownership
 
