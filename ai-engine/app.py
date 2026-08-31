@@ -10,12 +10,16 @@ import logging
 import os
 import random
 import textwrap
-from typing import Any
+from typing import Annotated, Any
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_file
+from fastapi import Depends, FastAPI, File, Form, Header, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel, field_validator
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 load_dotenv()
 
@@ -32,8 +36,18 @@ class ProviderUnavailable(ProviderError):
     """The configured image provider could not be reached."""
 
 
-def error_response(code: str, message: str, status: int):
-    return jsonify({"error": {"code": code, "message": message}}), status
+class ApiError(RuntimeError):
+    """A stable error response returned by the private LUMA API."""
+
+    def __init__(self, code: str, message: str, status_code: int):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+
+
+def error_response(code: str, message: str, status: int) -> JSONResponse:
+    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
 
 def parse_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
@@ -60,6 +74,50 @@ def prompt_seed(prompt: str, supplied_seed: Any = None) -> int:
         return parse_integer(supplied_seed, "seed", 0, 4_294_967_295)
     digest = hashlib.sha256(prompt.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "big")
+
+
+class GenerateRequest(BaseModel):
+    """Validated request body for image generation."""
+
+    prompt: str
+    negative_prompt: str = ""
+    width: int = 512
+    height: int = 512
+    seed: int | None = None
+    steps: int = 20
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def validate_prompt(cls, value: Any) -> str:
+        return parse_prompt(value)
+
+    @field_validator("negative_prompt", mode="before")
+    @classmethod
+    def validate_negative_prompt(cls, value: Any) -> str:
+        negative_prompt = str(value or "").strip()
+        if len(negative_prompt) > MAX_PROMPT_LENGTH:
+            raise ValueError("Negative prompt cannot exceed 1000 characters.")
+        return negative_prompt
+
+    @field_validator("width", "height", mode="before")
+    @classmethod
+    def validate_dimension(cls, value: Any, info) -> int:
+        dimension = parse_integer(value, info.field_name, MIN_DIMENSION, MAX_DIMENSION)
+        if dimension % 64:
+            raise ValueError("Width and height must be divisible by 64.")
+        return dimension
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def validate_seed(cls, value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        return parse_integer(value, "seed", 0, 4_294_967_295)
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def validate_steps(cls, value: Any) -> int:
+        return parse_integer(value, "steps", 1, 50)
 
 
 def is_forge_provider(config: dict[str, Any]) -> bool:
@@ -252,131 +310,174 @@ def edit_development_image(source: Image.Image, prompt: str, strength: float, se
     return Image.blend(image, textured, strength)
 
 
-def create_app(test_config: dict[str, Any] | None = None) -> Flask:
-    app = Flask(__name__)
-    app.config.from_mapping(
-        MAX_CONTENT_LENGTH=int(os.getenv("MAX_CONTENT_LENGTH", str(16 * 1024 * 1024))),
-        SERVICE_TOKEN=os.getenv("AI_SERVICE_TOKEN", "change-me-in-production"),
-        PROVIDER_NAME=os.getenv("AI_PROVIDER", "development-procedural"),
-        FORGE_URL=os.getenv("FORGE_URL", "http://127.0.0.1:7860"),
-        FORGE_USERNAME=os.getenv("FORGE_USERNAME", ""),
-        FORGE_PASSWORD=os.getenv("FORGE_PASSWORD", ""),
-        FORGE_CHECKPOINT=os.getenv("FORGE_CHECKPOINT", ""),
-        FORGE_SAMPLER=os.getenv("FORGE_SAMPLER", "Euler"),
-        FORGE_SCHEDULER=os.getenv("FORGE_SCHEDULER", ""),
-        FORGE_CFG_SCALE=float(os.getenv("FORGE_CFG_SCALE", "7")),
-        FORGE_EDIT_STEPS=int(os.getenv("FORGE_EDIT_STEPS", "20")),
-        FORGE_CONNECT_TIMEOUT=float(os.getenv("FORGE_CONNECT_TIMEOUT", "5")),
-        FORGE_READ_TIMEOUT=float(os.getenv("FORGE_READ_TIMEOUT", "300")),
-    )
+def validation_message(error: RequestValidationError) -> str:
+    if not error.errors():
+        return "The request is invalid."
+    detail = error.errors()[0]
+    context_error = detail.get("ctx", {}).get("error")
+    message = str(context_error or detail.get("msg") or "The request is invalid.")
+    return message.removeprefix("Value error, ")
+
+
+def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
+    config: dict[str, Any] = {
+        "MAX_CONTENT_LENGTH": int(os.getenv("MAX_CONTENT_LENGTH", str(16 * 1024 * 1024))),
+        "SERVICE_TOKEN": os.getenv("AI_SERVICE_TOKEN", "change-me-in-production"),
+        "PROVIDER_NAME": os.getenv("AI_PROVIDER", "development-procedural"),
+        "FORGE_URL": os.getenv("FORGE_URL", "http://127.0.0.1:7860"),
+        "FORGE_USERNAME": os.getenv("FORGE_USERNAME", ""),
+        "FORGE_PASSWORD": os.getenv("FORGE_PASSWORD", ""),
+        "FORGE_CHECKPOINT": os.getenv("FORGE_CHECKPOINT", ""),
+        "FORGE_SAMPLER": os.getenv("FORGE_SAMPLER", "Euler"),
+        "FORGE_SCHEDULER": os.getenv("FORGE_SCHEDULER", ""),
+        "FORGE_CFG_SCALE": float(os.getenv("FORGE_CFG_SCALE", "7")),
+        "FORGE_EDIT_STEPS": int(os.getenv("FORGE_EDIT_STEPS", "20")),
+        "FORGE_CONNECT_TIMEOUT": float(os.getenv("FORGE_CONNECT_TIMEOUT", "5")),
+        "FORGE_READ_TIMEOUT": float(os.getenv("FORGE_READ_TIMEOUT", "300")),
+    }
     if test_config:
-        app.config.update(test_config)
+        config.update(test_config)
 
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    app = FastAPI(
+        title="LUMA AI Service",
+        description="Private authenticated wrapper for WebUI Forge image generation and editing.",
+        version="1.0.0",
+    )
+    app.state.config = config
 
-    @app.before_request
-    def authenticate_private_api():
-        if request.path == "/health":
-            return None
-        supplied = request.headers.get("X-LUMA-Service-Token", "")
-        if not supplied or supplied != app.config["SERVICE_TOKEN"]:
-            return error_response("unauthorized", "A valid service token is required.", 401)
-        return None
+    @app.exception_handler(ApiError)
+    async def api_error_handler(_request: Request, error: ApiError):
+        return error_response(error.code, error.message, error.status_code)
 
-    @app.get("/health")
-    def health():
-        if is_forge_provider(app.config):
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_request: Request, error: RequestValidationError):
+        return error_response("validation_error", validation_message(error), 400)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error_handler(_request: Request, error: StarletteHTTPException):
+        if error.status_code == 404:
+            return error_response("not_found", "The requested endpoint does not exist.", 404)
+        return error_response("http_error", str(error.detail), error.status_code)
+
+    @app.middleware("http")
+    async def limit_request_size(request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length:
             try:
-                forge_request(app.config, "GET", "/sdapi/v1/sd-models")
+                if int(content_length) > int(config["MAX_CONTENT_LENGTH"]):
+                    return error_response("request_too_large", "The request exceeds the configured size limit.", 413)
+            except ValueError:
+                return error_response("validation_error", "Content-Length must be an integer.", 400)
+        return await call_next(request)
+
+    def authenticate_private_api(
+        service_token: Annotated[str | None, Header(alias="X-LUMA-Service-Token")] = None,
+    ) -> None:
+        if not service_token or service_token != config["SERVICE_TOKEN"]:
+            raise ApiError("unauthorized", "A valid service token is required.", 401)
+
+    private_api = Depends(authenticate_private_api)
+
+    @app.get("/health", tags=["health"])
+    def health():
+        if is_forge_provider(config):
+            try:
+                forge_request(config, "GET", "/sdapi/v1/sd-models")
             except ProviderError as exc:
-                return jsonify(
+                return JSONResponse(
                     {
                         "status": "unavailable",
                         "service": "luma-ai",
                         "provider": "webui-forge",
                         "error": str(exc),
-                    }
-                ), 503
-        return jsonify({"status": "ok", "service": "luma-ai", "provider": app.config["PROVIDER_NAME"]})
+                    },
+                    status_code=503,
+                )
+        return {"status": "ok", "service": "luma-ai", "provider": config["PROVIDER_NAME"]}
 
-    @app.post("/v1/generate")
-    def generate():
-        payload = request.get_json(silent=True) or {}
+    @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
+    def generate(payload: GenerateRequest):
+        seed = prompt_seed(payload.prompt, payload.seed)
         try:
-            prompt = parse_prompt(payload.get("prompt"))
-            width = parse_integer(payload.get("width", 512), "width", MIN_DIMENSION, MAX_DIMENSION)
-            height = parse_integer(payload.get("height", 512), "height", MIN_DIMENSION, MAX_DIMENSION)
-            if width % 64 or height % 64:
-                raise ValueError("Width and height must be divisible by 64.")
-            seed = prompt_seed(prompt, payload.get("seed"))
-            negative_prompt = str(payload.get("negative_prompt", "")).strip()
-            if len(negative_prompt) > MAX_PROMPT_LENGTH:
-                raise ValueError("Negative prompt cannot exceed 1000 characters.")
-            steps = parse_integer(payload.get("steps", 20), "steps", 1, 50)
-        except ValueError as exc:
-            return error_response("validation_error", str(exc), 400)
-
-        try:
-            if is_forge_provider(app.config):
-                image, seed = generate_forge_image(app.config, prompt, negative_prompt, width, height, seed, steps)
+            if is_forge_provider(config):
+                image, seed = generate_forge_image(
+                    config,
+                    payload.prompt,
+                    payload.negative_prompt,
+                    payload.width,
+                    payload.height,
+                    seed,
+                    payload.steps,
+                )
             else:
-                image = generate_development_image(prompt, width, height, seed)
+                image = generate_development_image(payload.prompt, payload.width, payload.height, seed)
         except ProviderUnavailable as exc:
-            return error_response("provider_unavailable", str(exc), 503)
+            raise ApiError("provider_unavailable", str(exc), 503) from exc
         except ProviderError as exc:
-            return error_response("provider_error", str(exc), 502)
+            raise ApiError("provider_error", str(exc), 502) from exc
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
-        buffer.seek(0)
-        response = send_file(buffer, mimetype="image/png", download_name=f"luma-{seed}.png")
-        response.headers["X-LUMA-Seed"] = str(seed)
-        response.headers["X-LUMA-Provider"] = app.config["PROVIDER_NAME"]
-        return response
+        return Response(
+            content=buffer.getvalue(),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
+                "X-LUMA-Seed": str(seed),
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+            },
+        )
 
-    @app.post("/v1/edit")
-    def edit():
-        upload = request.files.get("image")
-        if upload is None or not upload.filename:
-            return error_response("validation_error", "An image file is required.", 400)
+    @app.post("/v1/edit", tags=["images"], dependencies=[private_api])
+    def edit(
+        image: Annotated[UploadFile, File(description="Source image to edit")],
+        prompt: Annotated[str, Form()],
+        strength_value: Annotated[str, Form(alias="strength")] = "0.65",
+        seed_value: Annotated[str | None, Form(alias="seed")] = None,
+    ):
+        if not image.filename:
+            raise ApiError("validation_error", "An image file is required.", 400)
         try:
-            prompt = parse_prompt(request.form.get("prompt"))
-            strength = float(request.form.get("strength", "0.65"))
+            parsed_prompt = parse_prompt(prompt)
+            strength = float(strength_value)
             if not 0 <= strength <= 1:
                 raise ValueError("Strength must be between 0 and 1.")
-            seed = prompt_seed(prompt, request.form.get("seed"))
-            source = Image.open(upload.stream)
+            seed = prompt_seed(parsed_prompt, seed_value)
+            image.file.seek(0, io.SEEK_END)
+            if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
+                raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
+            image.file.seek(0)
+            source = Image.open(image.file)
             source.verify()
-            upload.stream.seek(0)
-            source = Image.open(upload.stream)
+            image.file.seek(0)
+            source = Image.open(image.file)
             if source.width * source.height > MAX_DIMENSION * MAX_DIMENSION * 4:
                 raise ValueError("The input image has too many pixels.")
+        except ApiError:
+            raise
         except (ValueError, UnidentifiedImageError) as exc:
-            return error_response("validation_error", str(exc) or "The uploaded file is not a valid image.", 400)
+            raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
         try:
-            if is_forge_provider(app.config):
-                image, seed = edit_forge_image(app.config, source, prompt, strength, seed)
+            if is_forge_provider(config):
+                result, seed = edit_forge_image(config, source, parsed_prompt, strength, seed)
             else:
-                image = edit_development_image(source, prompt, strength, seed)
+                result = edit_development_image(source, parsed_prompt, strength, seed)
         except ProviderUnavailable as exc:
-            return error_response("provider_unavailable", str(exc), 503)
+            raise ApiError("provider_unavailable", str(exc), 503) from exc
         except ProviderError as exc:
-            return error_response("provider_error", str(exc), 502)
+            raise ApiError("provider_error", str(exc), 502) from exc
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
-        buffer.seek(0)
-        response = send_file(buffer, mimetype="image/png", download_name=f"luma-edit-{seed}.png")
-        response.headers["X-LUMA-Seed"] = str(seed)
-        response.headers["X-LUMA-Provider"] = app.config["PROVIDER_NAME"]
-        return response
-
-    @app.errorhandler(413)
-    def request_too_large(_error):
-        return error_response("request_too_large", "The request exceeds the configured size limit.", 413)
-
-    @app.errorhandler(404)
-    def not_found(_error):
-        return error_response("not_found", "The requested endpoint does not exist.", 404)
+        result.save(buffer, format="PNG", optimize=True)
+        return Response(
+            content=buffer.getvalue(),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
+                "X-LUMA-Seed": str(seed),
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+            },
+        )
 
     return app
 
@@ -384,5 +485,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8000")), debug=os.getenv("FLASK_DEBUG", "0") == "1")
+    import uvicorn
+
+    uvicorn.run(
+        "app:app",
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=os.getenv("FASTAPI_DEBUG", "0") == "1",
+    )
 
