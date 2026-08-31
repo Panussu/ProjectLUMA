@@ -4,6 +4,7 @@ import base64
 import io
 import json
 
+from fastapi.testclient import TestClient
 from PIL import Image
 
 
@@ -25,13 +26,20 @@ class FakeForgeResponse:
 def test_health_is_public(ai_client):
     response = ai_client.get("/health")
     assert response.status_code == 200
-    assert response.get_json()["service"] == "luma-ai"
+    assert response.json()["service"] == "luma-ai"
+
+
+def test_fastapi_exposes_the_private_contract_in_openapi(ai_client):
+    response = ai_client.get("/openapi.json")
+    assert response.status_code == 200
+    assert response.json()["info"]["title"] == "LUMA AI Service"
+    assert {"/health", "/v1/generate", "/v1/edit"} <= set(response.json()["paths"])
 
 
 def test_private_endpoint_rejects_missing_token(ai_client):
     response = ai_client.post("/v1/generate", json={"prompt": "a valid prompt"})
     assert response.status_code == 401
-    assert response.get_json()["error"]["code"] == "unauthorized"
+    assert response.json()["error"]["code"] == "unauthorized"
 
 
 def test_generate_returns_repeatable_png(ai_client):
@@ -39,10 +47,10 @@ def test_generate_returns_repeatable_png(ai_client):
     first = ai_client.post("/v1/generate", json=payload, headers=service_headers())
     second = ai_client.post("/v1/generate", json=payload, headers=service_headers())
     assert first.status_code == 200
-    assert first.content_type == "image/png"
+    assert first.headers["content-type"] == "image/png"
     assert first.headers["X-LUMA-Seed"] == "42"
-    assert first.data == second.data
-    image = Image.open(io.BytesIO(first.data))
+    assert first.content == second.content
+    image = Image.open(io.BytesIO(first.content))
     assert image.size == (256, 320)
 
 
@@ -53,19 +61,19 @@ def test_generation_dimensions_are_validated(ai_client):
         headers=service_headers(),
     )
     assert response.status_code == 400
-    assert "divisible by 64" in response.get_json()["error"]["message"]
+    assert "divisible by 64" in response.json()["error"]["message"]
 
 
 def test_edit_returns_png(ai_client, png_bytes):
     response = ai_client.post(
         "/v1/edit",
-        data={"prompt": "make this vintage", "strength": "0.7", "seed": "8", "image": (io.BytesIO(png_bytes), "source.png")},
+        data={"prompt": "make this vintage", "strength": "0.7", "seed": "8"},
+        files={"image": ("source.png", png_bytes, "image/png")},
         headers=service_headers(),
-        content_type="multipart/form-data",
     )
     assert response.status_code == 200
-    assert response.content_type == "image/png"
-    assert Image.open(io.BytesIO(response.data)).size == (320, 320)
+    assert response.headers["content-type"] == "image/png"
+    assert Image.open(io.BytesIO(response.content)).size == (320, 320)
 
 
 def forge_app(ai_module):
@@ -105,22 +113,22 @@ def test_forge_generate_translates_payload_and_decodes_image(ai_module, png_byte
         return forge_image_response(png_bytes)
 
     monkeypatch.setattr(ai_module.requests, "request", fake_request)
-    client = forge_app(ai_module).test_client()
-    response = client.post(
-        "/v1/generate",
-        json={
-            "prompt": "a glass observatory under the stars",
-            "negative_prompt": "blurry",
-            "width": 512,
-            "height": 768,
-            "steps": 24,
-            "seed": 42,
-        },
-        headers=service_headers(),
-    )
+    with TestClient(forge_app(ai_module)) as client:
+        response = client.post(
+            "/v1/generate",
+            json={
+                "prompt": "a glass observatory under the stars",
+                "negative_prompt": "blurry",
+                "width": 512,
+                "height": 768,
+                "steps": 24,
+                "seed": 42,
+            },
+            headers=service_headers(),
+        )
 
     assert response.status_code == 200
-    assert response.content_type == "image/png"
+    assert response.headers["content-type"] == "image/png"
     assert response.headers["X-LUMA-Seed"] == "777"
     assert response.headers["X-LUMA-Provider"] == "forge"
     assert captured["method"] == "POST"
@@ -138,13 +146,13 @@ def test_forge_edit_sends_base64_source_image(ai_module, png_bytes, monkeypatch)
         return forge_image_response(png_bytes, seed=8)
 
     monkeypatch.setattr(ai_module.requests, "request", fake_request)
-    client = forge_app(ai_module).test_client()
-    response = client.post(
-        "/v1/edit",
-        data={"prompt": "make the colors warmer", "strength": "0.55", "seed": "8", "image": (io.BytesIO(png_bytes), "source.png")},
-        headers=service_headers(),
-        content_type="multipart/form-data",
-    )
+    with TestClient(forge_app(ai_module)) as client:
+        response = client.post(
+            "/v1/edit",
+            data={"prompt": "make the colors warmer", "strength": "0.55", "seed": "8"},
+            files={"image": ("source.png", png_bytes, "image/png")},
+            headers=service_headers(),
+        )
 
     assert response.status_code == 200
     assert captured["url"] == "http://forge.test:7860/sdapi/v1/img2img"
@@ -157,8 +165,9 @@ def test_forge_health_reports_unavailable_provider(ai_module, monkeypatch):
         raise ai_module.requests.ConnectionError("offline")
 
     monkeypatch.setattr(ai_module.requests, "request", connection_failed)
-    response = forge_app(ai_module).test_client().get("/health")
+    with TestClient(forge_app(ai_module)) as client:
+        response = client.get("/health")
     assert response.status_code == 503
-    assert response.get_json()["status"] == "unavailable"
-    assert response.get_json()["provider"] == "webui-forge"
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["provider"] == "webui-forge"
 
