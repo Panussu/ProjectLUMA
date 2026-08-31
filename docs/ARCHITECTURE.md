@@ -32,7 +32,8 @@
 
 - Run Stable Diffusion WebUI Forge through Stability Matrix on the AI computer.
 - Keep Forge on `127.0.0.1:7860` and enable its API with `--api`.
-- Expose the authenticated LUMA AI wrapper on port 8000 to the backend computer.
+- Run the authenticated FastAPI LUMA wrapper with Uvicorn on port 8000 for the backend computer.
+- Use the wrapper's `/docs` and `/openapi.json` pages while developing or testing the AI integration.
 - Translate LUMA generation and editing requests into Forge API requests.
 - Return a result file and useful metadata to the backend.
 - Avoid owning user accounts or browser sessions.
@@ -74,7 +75,7 @@ These are proposed defaults, not hard-coded requirements. Confirm the addresses 
 3. The user submits a prompt or an image edit.
 4. Flask validates the request, stores a `queued` job, and returns HTTP `202`.
 5. A backend worker changes the job to `processing` and calls the private AI service.
-6. The LUMA AI wrapper calls Forge, decodes its result, and sends the image back to Flask.
+6. The FastAPI LUMA wrapper calls Forge, decodes its result, and sends the image back to Flask.
 7. Flask stores the result, marks the job `completed`, and exposes its metadata.
 8. The frontend polls the job endpoint and displays the finished image.
 
