@@ -27,13 +27,23 @@ The automated tests cover authentication, user isolation, request validation, ge
 - AI outage is visible in the health badge and job error.
 - A completed image can be downloaded.
 
-## Three-computer acceptance test
+## Three-computer same-VLAN acceptance test
+
+Before testing, record the actual IPv4 address from `ipconfig` on each PC. Confirm PC 2 can reach Flask on PC 3 and PC 3 can reach FastAPI on PC 1:
+
+```powershell
+# PC 2
+Test-NetConnection 192.168.1.20 -Port 5000
+
+# PC 3
+Test-NetConnection 192.168.1.30 -Port 8000
+```
 
 | Check | Expected result |
 | --- | --- |
 | Browser opens `192.168.1.10` | Nginx serves the LUMA frontend |
 | Browser calls `/api/v1/health` | Nginx forwards to Flask |
-| Flask calls `192.168.1.30:8000/health` | AI dependency reports `ok` |
+| Flask calls FastAPI at `192.168.1.30:8000/health` | AI dependency reports `ok` |
 | Generate request | HTTP 202 followed by a completed job |
 | Edit request | Upload reaches Flask, then the AI computer |
 | Result request | Signed `/media` URL returns the PNG |
@@ -41,5 +51,5 @@ The automated tests cover authentication, user isolation, request validation, ge
 | Invalid service token | AI service returns HTTP 401 |
 | Backend computer stopped | Nginx returns a gateway error; frontend files remain reachable |
 
-Record actual addresses, test date, tester, result, and evidence before the demonstration. Do not claim the LAN deployment works until this table is executed on the real computers.
+Record the VLAN name, actual addresses, test date, tester, result, and evidence before the demonstration. Do not claim the three-PC deployment works until this table is executed on the real computers.
 
