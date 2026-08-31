@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +40,8 @@ def ai_app(ai_module):
 
 @pytest.fixture()
 def ai_client(ai_app):
-    return ai_app.test_client()
+    with TestClient(ai_app) as client:
+        yield client
 
 
 @pytest.fixture()
