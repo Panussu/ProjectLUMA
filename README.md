@@ -120,6 +120,8 @@ The remote repository contains `Frontend`, `Backend`, `AiEngine`, `Routing`, and
 
 The normal provider is Stable Diffusion WebUI Forge installed and launched through Stability Matrix. The LUMA AI wrapper converts the stable `/v1/generate` and `/v1/edit` contract into Forge `/sdapi/v1/txt2img` and `/sdapi/v1/img2img` requests.
 
+The private AI wrapper uses FastAPI and runs with Uvicorn on port 8000. Its interactive API documentation is available at `http://127.0.0.1:8000/docs` on the AI computer. The main user API, authentication, jobs, and SQLite database remain in the Flask backend on port 5000.
+
 A lightweight procedural provider remains available for development, automated tests, and Docker demonstrations without a GPU. It is not a trained generative model and must not be presented as one.
 
 ## Security notes
