@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 
 $checks = @(
     @{ Name = "Flask backend"; HostName = $BackendHost; Port = $BackendPort },
-    @{ Name = "AI engine"; HostName = $AiHost; Port = $AiPort }
+    @{ Name = "FastAPI AI wrapper"; HostName = $AiHost; Port = $AiPort }
 )
 
 foreach ($check in $checks) {

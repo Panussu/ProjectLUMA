@@ -3,6 +3,7 @@
 ## Decisions
 
 - Start with three computers.
+- Run all three computers on the same trusted classroom VLAN for the demonstration.
 - Keep all IP addresses, ports, and secrets in environment variables.
 - Use SQLite on the backend computer for the first working version.
 - Allow PostgreSQL through the same SQLAlchemy database interface.
@@ -57,7 +58,7 @@
 | LUMA AI wrapper | `http://localhost:8000` |
 | WebUI Forge | `http://127.0.0.1:7860` |
 
-### Three-computer classroom network
+### Three-computer classroom VLAN
 
 | Service | Address |
 | --- | --- |
@@ -66,7 +67,7 @@
 | LUMA AI wrapper, reachable from backend | `http://192.168.1.30:8000` |
 | WebUI Forge, local to AI computer | `http://127.0.0.1:7860` |
 
-These are proposed defaults, not hard-coded requirements. Confirm the addresses with `ipconfig` on each computer before deployment.
+These are proposed defaults, not hard-coded requirements. Confirm the addresses with `ipconfig` on each computer before deployment. The three PCs must be able to reach one another on the same VLAN; no VPN, public IP address, or router port forwarding is required.
 
 ## Data flow
 
