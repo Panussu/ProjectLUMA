@@ -20,6 +20,17 @@ Set `AI_PROVIDER=development-procedural` to test authentication, routing, upload
 
 All non-health requests require the `X-LUMA-Service-Token` header.
 
+## PC 1 on the classroom VLAN
+
+For the three-computer demonstration, PC 1 runs both WebUI Forge and this FastAPI wrapper. Forge remains on `127.0.0.1:7860`, while FastAPI listens on `0.0.0.0:8000` so only the Flask computer needs network access to it.
+
+```powershell
+Copy-Item .env.vlan.example .env
+python app.py
+```
+
+Confirm PC 1's actual VLAN address with `ipconfig`. The proposed address is `192.168.1.30`; it is not hard-coded by the application. Allow inbound TCP port `8000` from PC 3, but do not expose Forge port `7860` to the VLAN.
+
 Start locally:
 
 ```powershell
