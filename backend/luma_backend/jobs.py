@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, send_from_directory
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from PIL import Image, UnidentifiedImageError
 
@@ -160,7 +160,27 @@ def get_job(job_id: str):
 
 @media_blueprint.get("/<path:filename>")
 def media(filename: str):
+    verify_jwt_in_request(optional=True)
+    identity = get_jwt_identity()
+    if identity is not None:
+        job = db.session.scalar(
+            db.select(Job).where(
+                Job.user_id == int(identity),
+                Job.result_filename == filename,
+                Job.status == "completed",
+            )
+        )
+        if job is None:
+            return error_response("media_not_found", "The requested image does not exist.", 404)
+        return send_media_file(filename)
+
     token = request.args.get("token", "")
+    if not token:
+        return error_response(
+            "authentication_required",
+            "A bearer token or signed media link is required.",
+            401,
+        )
     try:
         payload = serializer().loads(token, max_age=current_app.config["MEDIA_TOKEN_MAX_AGE"])
     except SignatureExpired:
@@ -170,8 +190,17 @@ def media(filename: str):
     if payload.get("file") != filename:
         return error_response("invalid_media_link", "This image link is invalid.", 401)
     job = db.session.get(Job, payload.get("job"))
-    if job is None or job.user_id != payload.get("user") or job.result_filename != filename:
+    if (
+        job is None
+        or job.status != "completed"
+        or job.user_id != payload.get("user")
+        or job.result_filename != filename
+    ):
         return error_response("media_not_found", "The requested image does not exist.", 404)
+    return send_media_file(filename)
+
+
+def send_media_file(filename: str):
     response = send_from_directory(current_app.config["MEDIA_ROOT"], filename, conditional=True)
     response.headers["Cache-Control"] = "private, max-age=3600"
     return response

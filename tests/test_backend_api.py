@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from urllib.parse import urlsplit
 
 from luma_backend import worker
 
@@ -72,6 +73,43 @@ def test_generate_job_completes_and_media_link_works(
     media = backend_client.get(job["result_url"])
     assert media.status_code == 200
     assert media.data == png_bytes
+
+
+def test_media_accepts_owner_bearer_token_and_rejects_other_users(
+    backend_client, registered_user, png_bytes, monkeypatch
+):
+    monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: FakeAiResponse(png_bytes))
+    created = backend_client.post(
+        "/api/v1/jobs/generate",
+        json={"prompt": "a private bearer media result"},
+        headers=authorization(registered_user["token"]),
+    )
+    job_id = created.get_json()["job"]["id"]
+    job = backend_client.get(
+        f"/api/v1/jobs/{job_id}", headers=authorization(registered_user["token"])
+    ).get_json()["job"]
+    media_path = urlsplit(job["result_url"]).path
+
+    owner_download = backend_client.get(
+        media_path, headers=authorization(registered_user["token"])
+    )
+    assert owner_download.status_code == 200
+    assert owner_download.data == png_bytes
+
+    second = backend_client.post(
+        "/api/v1/auth/register",
+        json={"username": "media.viewer", "password": "another-valid-password"},
+    ).get_json()
+    denied = backend_client.get(
+        media_path, headers=authorization(second["access_token"])
+    )
+    assert denied.status_code == 404
+
+
+def test_media_requires_bearer_token_or_signed_link(backend_client):
+    response = backend_client.get("/media/missing.png")
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "authentication_required"
 
 
 def test_edit_job_accepts_valid_image(

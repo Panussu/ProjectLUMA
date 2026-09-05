@@ -2,6 +2,8 @@
 
 The backend owns authentication, users, jobs, database records, private AI-service calls, and result images.
 
+Completed result images can be downloaded either through the expiring signed URL returned with a job or with the owner's `Authorization: Bearer <token>` header. A different user's bearer token never grants access to the image.
+
 ## Development
 
 ```powershell
