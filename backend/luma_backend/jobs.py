@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import re
 import secrets
 import uuid
 from pathlib import Path
@@ -16,6 +18,7 @@ from .worker import queue_job
 jobs_blueprint = Blueprint("jobs", __name__)
 media_blueprint = Blueprint("media", __name__)
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
+INTEGER_PATTERN = re.compile(r"^[+-]?\d+$")
 
 
 def error_response(code: str, message: str, status: int):
@@ -25,17 +28,21 @@ def error_response(code: str, message: str, status: int):
 def parse_integer(value, name: str, minimum: int, maximum: int) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer.")
-    try:
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and INTEGER_PATTERN.fullmatch(value.strip()):
         parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
+    else:
+        raise ValueError(f"{name} must be an integer.")
     if not minimum <= parsed <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}.")
     return parsed
 
 
 def parse_prompt(value) -> str:
-    prompt = str(value or "").strip()
+    if not isinstance(value, str):
+        raise ValueError("Prompt must be a string.")
+    prompt = value.strip()
     if not 3 <= len(prompt) <= 1000:
         raise ValueError("Prompt must contain between 3 and 1000 characters.")
     return prompt
@@ -66,7 +73,10 @@ def generate():
     data = request.get_json(silent=True) or {}
     try:
         prompt = parse_prompt(data.get("prompt"))
-        negative_prompt = str(data.get("negative_prompt", "")).strip()
+        raw_negative_prompt = data.get("negative_prompt", "")
+        if not isinstance(raw_negative_prompt, str):
+            raise ValueError("Negative prompt must be a string.")
+        negative_prompt = raw_negative_prompt.strip()
         if len(negative_prompt) > 1000:
             raise ValueError("Negative prompt cannot exceed 1000 characters.")
         width = parse_integer(data.get("width", 512), "width", 256, 1024)
@@ -104,34 +114,40 @@ def edit():
     try:
         prompt = parse_prompt(request.form.get("prompt"))
         strength = float(request.form.get("strength", "0.65"))
-        if not 0 <= strength <= 1:
+        if not math.isfinite(strength) or not 0 <= strength <= 1:
             raise ValueError("Strength must be between 0 and 1.")
         seed = parse_integer(request.form.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
-        image = Image.open(upload.stream)
-        image.verify()
-        if image.format not in ALLOWED_FORMATS:
-            raise ValueError("Only PNG, JPEG, and WebP images are accepted.")
+        with Image.open(upload.stream) as image:
+            image.verify()
+            image_format = image.format
+            if image_format not in ALLOWED_FORMATS:
+                raise ValueError("Only PNG, JPEG, and WebP images are accepted.")
         upload.stream.seek(0)
-        image = Image.open(upload.stream)
-        if image.width * image.height > 4_194_304:
-            raise ValueError("The input image has too many pixels.")
+        with Image.open(upload.stream) as image:
+            if image.width * image.height > 4_194_304:
+                raise ValueError("The input image has too many pixels.")
         upload.stream.seek(0)
-    except (ValueError, UnidentifiedImageError) as exc:
+    except (Image.DecompressionBombError, OSError, ValueError, UnidentifiedImageError) as exc:
         return error_response("validation_error", str(exc) or "The uploaded file is not a valid image.", 400)
 
-    source_filename = f"{uuid.uuid4()}.{image.format.lower().replace('jpeg', 'jpg')}"
+    source_filename = f"{uuid.uuid4()}.{image_format.lower().replace('jpeg', 'jpg')}"
     source_path = Path(current_app.config["UPLOAD_ROOT"]) / source_filename
-    upload.save(source_path)
-    job = Job(
-        user_id=current_user_id(),
-        type="edit",
-        prompt=prompt,
-        strength=strength,
-        seed=seed,
-        source_filename=source_filename,
-    )
-    db.session.add(job)
-    db.session.commit()
+    try:
+        upload.save(source_path)
+        job = Job(
+            user_id=current_user_id(),
+            type="edit",
+            prompt=prompt,
+            strength=strength,
+            seed=seed,
+            source_filename=source_filename,
+        )
+        db.session.add(job)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        source_path.unlink(missing_ok=True)
+        raise
     response = serialized(job)
     queue_job(current_app._get_current_object(), job.id)
     return jsonify({"job": response}), 202

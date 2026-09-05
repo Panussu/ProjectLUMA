@@ -19,19 +19,23 @@ executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="luma-job")
 logger = logging.getLogger(__name__)
 
 
+class JobProcessingError(RuntimeError):
+    """A job failure message that is safe to expose through the public API."""
+
+
 def save_validated_result(content: bytes, destination: Path, max_pixels: int) -> None:
     """Validate the private AI response and atomically publish a PNG result."""
     try:
         with Image.open(io.BytesIO(content)) as image:
             if image.format != "PNG":
-                raise RuntimeError("AI service result must be a PNG image.")
+                raise JobProcessingError("AI service result must be a PNG image.")
             if image.width * image.height > max_pixels:
-                raise RuntimeError("AI service result exceeds the configured pixel limit.")
+                raise JobProcessingError("AI service result exceeds the configured pixel limit.")
             image.verify()
-    except RuntimeError:
+    except JobProcessingError:
         raise
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as exc:
-        raise RuntimeError("AI service returned corrupt or unsupported image data.") from exc
+        raise JobProcessingError("AI service returned corrupt or unsupported image data.") from exc
 
     temporary_path = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -118,19 +122,20 @@ def process_job(app: Flask, job_id: str) -> None:
                     detail = response.json().get("error", {}).get("message", response.text)
                 except ValueError:
                     detail = response.text
-                raise RuntimeError(f"AI service returned {response.status_code}: {detail[:300]}")
+                logger.warning("AI service rejected job %s with HTTP %s: %s", job_id, response.status_code, detail[:300])
+                raise JobProcessingError(f"AI service rejected the job (HTTP {response.status_code}).")
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
             if not response.content or content_type != "image/png":
-                raise RuntimeError("AI service did not return a PNG image response.")
+                raise JobProcessingError("AI service did not return a PNG image response.")
 
             returned_seed = response.headers.get("X-LUMA-Seed")
             if returned_seed:
                 try:
                     parsed_seed = int(returned_seed)
                 except ValueError as exc:
-                    raise RuntimeError("AI service returned an invalid seed header.") from exc
+                    raise JobProcessingError("AI service returned an invalid seed header.") from exc
                 if not 0 <= parsed_seed <= 4_294_967_295:
-                    raise RuntimeError("AI service returned an invalid seed header.")
+                    raise JobProcessingError("AI service returned an invalid seed header.")
             else:
                 parsed_seed = None
 
@@ -153,7 +158,14 @@ def process_job(app: Flask, job_id: str) -> None:
             failed_job = db.session.get(Job, job_id)
             if failed_job:
                 failed_job.status = "failed"
-                failed_job.error = str(exc)[:1000]
+                if isinstance(exc, requests.Timeout):
+                    failed_job.error = "The AI service timed out before completing the job."
+                elif isinstance(exc, requests.RequestException):
+                    failed_job.error = "The AI service is unavailable. Try again after it is restarted."
+                elif isinstance(exc, JobProcessingError):
+                    failed_job.error = str(exc)[:1000]
+                else:
+                    failed_job.error = "The backend could not complete this job. Check the server logs."
                 failed_job.progress = 0
                 db.session.commit()
         finally:
