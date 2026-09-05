@@ -34,3 +34,20 @@ The first version uses an in-process thread pool for jobs. Run one backend proce
 
 On startup, the backend requeues durable `queued` jobs and marks previously `processing` jobs as failed because their in-flight AI requests were interrupted. Keep `RECOVER_JOBS_ON_STARTUP=1` for the demonstration unless an operator is deliberately inspecting the database without running work.
 
+## Backup and retention
+
+Stop new job submissions before taking a demonstration backup, then run:
+
+```powershell
+./.venv/Scripts/python.exe maintenance.py backup
+```
+
+The command creates a timestamped SQLite and media backup under `backend/backups`. Keep that directory private because it contains user and image data. Preview expired completed/failed jobs without deleting anything, then apply the cleanup only after checking the counts:
+
+```powershell
+./.venv/Scripts/python.exe maintenance.py cleanup
+./.venv/Scripts/python.exe maintenance.py cleanup --apply
+```
+
+The default retention period is controlled by `MEDIA_RETENTION_DAYS`.
+

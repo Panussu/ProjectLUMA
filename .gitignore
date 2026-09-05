@@ -12,6 +12,7 @@ htmlcov/
 backend/instance/
 backend/data/
 backend/media/
+backend/backups/
 ai-engine/output/
 ai-engine/uploads/
 node_modules/

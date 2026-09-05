@@ -82,5 +82,6 @@ class Config:
             "no",
         }
         self.MEDIA_TOKEN_MAX_AGE = int(os.getenv("MEDIA_TOKEN_MAX_AGE", "3600"))
+        self.MEDIA_RETENTION_DAYS = int(os.getenv("MEDIA_RETENTION_DAYS", "30"))
         self.CORS_ORIGINS = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",") if item.strip()]
 
