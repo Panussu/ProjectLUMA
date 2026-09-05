@@ -30,3 +30,5 @@ Confirm the three addresses with `ipconfig` before editing `.env`. The proposed 
 
 The first version uses an in-process thread pool for jobs. Run one backend process for the classroom demonstration. For multiple backend processes, replace it with a shared queue such as Celery or RQ before scaling.
 
+On startup, the backend requeues durable `queued` jobs and marks previously `processing` jobs as failed because their in-flight AI requests were interrupted. Keep `RECOVER_JOBS_ON_STARTUP=1` for the demonstration unless an operator is deliberately inspecting the database without running work.
+

@@ -75,6 +75,11 @@ class Config:
         self.AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN", "change-me-in-production")
         self.AI_CONNECT_TIMEOUT = float(os.getenv("AI_CONNECT_TIMEOUT", "5"))
         self.AI_READ_TIMEOUT = float(os.getenv("AI_READ_TIMEOUT", "180"))
+        self.RECOVER_JOBS_ON_STARTUP = os.getenv("RECOVER_JOBS_ON_STARTUP", "1").strip().casefold() not in {
+            "0",
+            "false",
+            "no",
+        }
         self.MEDIA_TOKEN_MAX_AGE = int(os.getenv("MEDIA_TOKEN_MAX_AGE", "3600"))
         self.CORS_ORIGINS = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",") if item.strip()]
 

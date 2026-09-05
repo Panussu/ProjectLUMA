@@ -15,6 +15,7 @@ from .auth import auth_blueprint
 from .config import Config, validate_runtime_config
 from .extensions import db
 from .jobs import jobs_blueprint, media_blueprint
+from .worker import recover_jobs_on_startup
 
 jwt = JWTManager()
 
@@ -112,6 +113,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @jwt.expired_token_loader
     def expired_token(_header, _payload):
         return jsonify({"error": {"code": "token_expired", "message": "The access token has expired."}}), 401
+
+    if app.config["RECOVER_JOBS_ON_STARTUP"]:
+        recover_jobs_on_startup(app)
 
     return app
 

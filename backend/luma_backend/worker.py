@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,21 +17,49 @@ logger = logging.getLogger(__name__)
 
 
 def queue_job(app: Flask, job_id: str) -> None:
+    logger.info("Queueing job %s", job_id)
     if app.config.get("EXECUTE_JOBS_INLINE"):
         process_job(app, job_id)
     else:
         executor.submit(process_job, app, job_id)
 
 
+def recover_jobs_on_startup(app: Flask) -> None:
+    """Recover durable queued jobs and close work interrupted by a restart."""
+    with app.app_context():
+        interrupted = db.session.scalars(
+            db.select(Job).where(Job.status == "processing")
+        ).all()
+        queued_ids = list(
+            db.session.scalars(db.select(Job.id).where(Job.status == "queued")).all()
+        )
+        for job in interrupted:
+            job.status = "failed"
+            job.progress = 0
+            job.error = "The backend restarted before this job completed. Submit the job again."
+        if interrupted:
+            db.session.commit()
+
+    if interrupted:
+        logger.warning("Marked %d interrupted job(s) as failed", len(interrupted))
+    if queued_ids:
+        logger.info("Recovering %d queued job(s)", len(queued_ids))
+        for job_id in queued_ids:
+            queue_job(app, job_id)
+
+
 def process_job(app: Flask, job_id: str) -> None:
+    started_at = time.perf_counter()
     source_to_remove: Path | None = None
     with app.app_context():
         job = db.session.get(Job, job_id)
         if job is None or job.status != "queued":
+            logger.info("Skipping job %s because it is missing or no longer queued", job_id)
             return
         job.status = "processing"
         job.progress = 15
         db.session.commit()
+        logger.info("Started %s job %s", job.type, job_id)
 
         try:
             headers = {"X-LUMA-Service-Token": app.config["AI_SERVICE_TOKEN"]}
@@ -81,8 +110,9 @@ def process_job(app: Flask, job_id: str) -> None:
             job.completed_at = datetime.now(timezone.utc)
             job.error = None
             db.session.commit()
+            logger.info("Completed job %s in %.2f seconds", job_id, time.perf_counter() - started_at)
         except Exception as exc:
-            logger.exception("Job %s failed", job_id)
+            logger.exception("Job %s failed after %.2f seconds", job_id, time.perf_counter() - started_at)
             db.session.rollback()
             failed_job = db.session.get(Job, job_id)
             if failed_job:
