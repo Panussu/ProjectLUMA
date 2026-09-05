@@ -12,7 +12,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 
 from .auth import auth_blueprint
-from .config import Config
+from .config import Config, validate_runtime_config
 from .extensions import db
 from .jobs import jobs_blueprint, media_blueprint
 
@@ -24,6 +24,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app.config.from_object(Config())
     if test_config:
         app.config.update(test_config)
+
+    validate_runtime_config(app.config)
 
     Path(app.config["MEDIA_ROOT"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["UPLOAD_ROOT"]).mkdir(parents=True, exist_ok=True)
