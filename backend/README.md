@@ -4,6 +4,8 @@ The backend owns authentication, users, jobs, database records, private AI-servi
 
 Completed result images can be downloaded either through the expiring signed URL returned with a job or with the owner's `Authorization: Bearer <token>` header. A different user's bearer token never grants access to the image.
 
+Before publishing a result, the worker verifies that the AI service returned a readable PNG within `MAX_OUTPUT_PIXELS` and writes it through a temporary file. Invalid or partial responses fail the job without exposing a broken result file.
+
 ## Development
 
 ```powershell

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from luma_backend import worker
@@ -20,6 +21,12 @@ class FakeAiResponse:
 
     def json(self):
         return {}
+
+
+class InvalidAiResponse(FakeAiResponse):
+    def __init__(self, content: bytes = b"not-an-image", content_type: str = "image/png"):
+        super().__init__(content)
+        self.headers["Content-Type"] = content_type
 
 
 def authorization(token: str) -> dict[str, str]:
@@ -157,3 +164,22 @@ def test_protected_routes_require_authentication(backend_client):
     response = backend_client.get("/api/v1/jobs")
     assert response.status_code == 401
     assert response.get_json()["error"]["code"] == "authentication_required"
+
+
+def test_corrupt_ai_response_fails_job_without_publishing_media(
+    backend_app, backend_client, registered_user, monkeypatch
+):
+    monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: InvalidAiResponse())
+    created = backend_client.post(
+        "/api/v1/jobs/generate",
+        json={"prompt": "response validation example"},
+        headers=authorization(registered_user["token"]),
+    )
+    job_id = created.get_json()["job"]["id"]
+
+    job = backend_client.get(
+        f"/api/v1/jobs/{job_id}", headers=authorization(registered_user["token"])
+    ).get_json()["job"]
+    assert job["status"] == "failed"
+    assert job["result_url"] is None
+    assert list(Path(backend_app.config["MEDIA_ROOT"]).iterdir()) == []

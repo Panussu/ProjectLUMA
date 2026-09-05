@@ -1,19 +1,44 @@
 from __future__ import annotations
 
+import io
 import logging
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 from flask import Flask
+from PIL import Image, UnidentifiedImageError
 
 from .extensions import db
 from .models import Job
 
 executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="luma-job")
 logger = logging.getLogger(__name__)
+
+
+def save_validated_result(content: bytes, destination: Path, max_pixels: int) -> None:
+    """Validate the private AI response and atomically publish a PNG result."""
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            if image.format != "PNG":
+                raise RuntimeError("AI service result must be a PNG image.")
+            if image.width * image.height > max_pixels:
+                raise RuntimeError("AI service result exceeds the configured pixel limit.")
+            image.verify()
+    except RuntimeError:
+        raise
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as exc:
+        raise RuntimeError("AI service returned corrupt or unsupported image data.") from exc
+
+    temporary_path = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_bytes(content)
+        temporary_path.replace(destination)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def queue_job(app: Flask, job_id: str) -> None:
@@ -94,17 +119,28 @@ def process_job(app: Flask, job_id: str) -> None:
                 except ValueError:
                     detail = response.text
                 raise RuntimeError(f"AI service returned {response.status_code}: {detail[:300]}")
-            if not response.content or "image/" not in response.headers.get("Content-Type", ""):
-                raise RuntimeError("AI service did not return a valid image response.")
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
+            if not response.content or content_type != "image/png":
+                raise RuntimeError("AI service did not return a PNG image response.")
+
+            returned_seed = response.headers.get("X-LUMA-Seed")
+            if returned_seed:
+                try:
+                    parsed_seed = int(returned_seed)
+                except ValueError as exc:
+                    raise RuntimeError("AI service returned an invalid seed header.") from exc
+                if not 0 <= parsed_seed <= 4_294_967_295:
+                    raise RuntimeError("AI service returned an invalid seed header.")
+            else:
+                parsed_seed = None
 
             result_filename = f"{job.id}.png"
             result_path = Path(app.config["MEDIA_ROOT"]) / result_filename
-            result_path.write_bytes(response.content)
+            save_validated_result(response.content, result_path, app.config["MAX_OUTPUT_PIXELS"])
             job.result_filename = result_filename
             job.provider = response.headers.get("X-LUMA-Provider", "unknown")[:80]
-            returned_seed = response.headers.get("X-LUMA-Seed")
-            if returned_seed:
-                job.seed = int(returned_seed)
+            if parsed_seed is not None:
+                job.seed = parsed_seed
             job.status = "completed"
             job.progress = 100
             job.completed_at = datetime.now(timezone.utc)

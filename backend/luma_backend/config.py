@@ -69,6 +69,7 @@ class Config:
         self.SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", database_default)
         self.SQLALCHEMY_TRACK_MODIFICATIONS = False
         self.MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(16 * 1024 * 1024)))
+        self.MAX_OUTPUT_PIXELS = int(os.getenv("MAX_OUTPUT_PIXELS", str(4_194_304)))
         self.MEDIA_ROOT = str(Path(os.getenv("MEDIA_ROOT", backend_root / "media")).resolve())
         self.UPLOAD_ROOT = str(Path(os.getenv("UPLOAD_ROOT", backend_root / "data" / "uploads")).resolve())
         self.AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8000")
