@@ -34,6 +34,11 @@ def backup_backend(app: Flask, destination_root: Path) -> Path:
     if not database_path.is_file():
         raise RuntimeError(f"SQLite database does not exist: {database_path}")
 
+    media_root = Path(app.config["MEDIA_ROOT"]).resolve()
+    destination_root = destination_root.resolve()
+    if destination_root == media_root or media_root in destination_root.parents:
+        raise RuntimeError("Backup destination must be outside the media directory.")
+
     created_at = datetime.now(timezone.utc)
     backup_name = f"luma-{created_at.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
     backup_path = destination_root.resolve() / backup_name
@@ -49,7 +54,6 @@ def backup_backend(app: Flask, destination_root: Path) -> Path:
         target_connection.close()
         source_connection.close()
 
-    media_root = Path(app.config["MEDIA_ROOT"]).resolve()
     if media_root.is_dir():
         shutil.copytree(media_root, media_backup)
     else:

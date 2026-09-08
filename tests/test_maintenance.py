@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -67,3 +68,13 @@ def test_cleanup_previews_before_deleting_expired_jobs(backend_app):
     assert not media_path.exists()
     with backend_app.app_context():
         assert db.session.get(Job, job_id) is None
+
+
+@pytest.mark.parametrize("subdirectory", ["", "backups"])
+def test_backup_rejects_destination_inside_media(backend_app, subdirectory):
+    persisted_completed_job(backend_app)
+    media_root = Path(backend_app.config["MEDIA_ROOT"])
+    before = set(media_root.rglob("*"))
+    with pytest.raises(RuntimeError, match="outside the media directory"):
+        backup_backend(backend_app, media_root / subdirectory)
+    assert set(media_root.rglob("*")) == before
