@@ -1,3 +1,7 @@
 # ProjectLUMA Backend
 
-This branch contains the Flask backend owned by PC 3 in the three-computer LUMA classroom deployment. See [backend/README.md](backend/README.md) for development commands and [docs/BACKEND_PRE_DEMO_CHECKLIST.md](docs/BACKEND_PRE_DEMO_CHECKLIST.md) for the final VLAN checklist.
+สาขานี้เป็นงาน Flask ของ PC 3 ดูแลผู้ใช้ JWT คิวงาน SQLite และไฟล์ภาพ โดยเชื่อม PC 2 ที่รัน Nginx และ PC 1 ที่รัน FastAPI กับ Forge ภายใน VLAN เดียวกัน
+
+อ่าน [คู่มือ Backend](backend/README.md) สำหรับเริ่มบริการ กู้คิว สำรองข้อมูล และล้างงานเก่า ก่อนสาธิตใช้ [รายการตรวจ PC 3](docs/BACKEND_PRE_DEMO_CHECKLIST.md)
+
+โค้ดมีคอมเมนต์ภาษาไทยอธิบายแต่ละส่วน ความสามารถใหม่บนสาขานี้ยังต้องรวมและทดสอบกับ main ก่อนสาธิตระบบครบชุด

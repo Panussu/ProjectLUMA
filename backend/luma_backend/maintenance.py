@@ -1,3 +1,4 @@
+# เครื่องมือสำรองข้อมูลและจัดการงานที่พ้นอายุการเก็บรักษา
 from __future__ import annotations
 
 import json
@@ -14,6 +15,7 @@ from .extensions import db
 from .models import Job
 
 
+# ตรวจเส้นทางไฟล์ให้อยู่ใต้โฟลเดอร์ที่ระบบดูแลก่อนเข้าถึงหรือลบ
 def _managed_file(root: Path, filename: str | None) -> Path | None:
     if not filename:
         return None
@@ -24,6 +26,7 @@ def _managed_file(root: Path, filename: str | None) -> Path | None:
     return candidate
 
 
+# สร้างสำเนา SQLite แล้วคัดลอกภาพและ manifest โดยไม่รวมภาพต้นทางที่รอแก้ไข
 def backup_backend(app: Flask, destination_root: Path) -> Path:
     """Create a consistent SQLite snapshot and copy the result media directory."""
     database_url = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
@@ -45,6 +48,8 @@ def backup_backend(app: Flask, destination_root: Path) -> Path:
     media_backup = backup_path / "media"
     backup_path.mkdir(parents=True, exist_ok=False)
 
+    # ใช้ SQLite backup API สร้างสำเนาฐานข้อมูลขณะเปิดการเชื่อมต่อ
+
     source_connection = sqlite3.connect(str(database_path))
     target_connection = sqlite3.connect(str(backup_path / "luma.db"))
     try:
@@ -54,12 +59,15 @@ def backup_backend(app: Flask, destination_root: Path) -> Path:
         target_connection.close()
         source_connection.close()
 
+    # คัดลอกภาพแยกจากฐานข้อมูล ควรหยุดส่งงานระหว่างสำรองให้สองส่วนสอดคล้องกัน
+
     if media_root.is_dir():
         shutil.copytree(media_root, media_backup)
     else:
         media_backup.mkdir()
 
     media_count = sum(1 for path in media_backup.rglob("*") if path.is_file())
+    # เก็บข้อมูลกำกับสำเนาสำรองเพื่อใช้ตรวจไฟล์และเวลาที่สร้าง
     manifest = {
         "created_at": created_at.isoformat().replace("+00:00", "Z"),
         "database": "luma.db",
@@ -72,6 +80,7 @@ def backup_backend(app: Flask, destination_root: Path) -> Path:
     return backup_path
 
 
+# แสดงรายการงานเก่าที่จบแล้ว และลบจริงเฉพาะเมื่อเปิด apply
 def cleanup_expired_jobs(app: Flask, older_than_days: int, apply: bool = False) -> dict[str, int | bool]:
     """Preview or remove terminal jobs and their managed files after retention expires."""
     if older_than_days < 1:
@@ -90,6 +99,7 @@ def cleanup_expired_jobs(app: Flask, older_than_days: int, apply: bool = False) 
                 Job.updated_at < cutoff,
             )
         ).all()
+        # ลบข้อมูลจริงเฉพาะเมื่อผู้เรียกยืนยัน ส่วนค่าเริ่มต้นแสดงจำนวนที่เข้าเงื่อนไข
         if apply:
             for job in jobs:
                 media_path = _managed_file(media_root, job.result_filename)
