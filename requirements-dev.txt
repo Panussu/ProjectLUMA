@@ -1,3 +1,4 @@
+# ไลบรารีหรือรายการอ้างอิงสำหรับติดตั้งสภาพแวดล้อมของส่วนนี้
 -r backend/requirements.txt
 -r ai-engine/requirements.txt
 httpx2==2.12.0

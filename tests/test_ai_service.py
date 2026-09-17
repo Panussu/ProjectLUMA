@@ -1,3 +1,4 @@
+# กรณีทดสอบพฤติกรรมของ ai_service
 from __future__ import annotations
 
 import base64
@@ -8,27 +9,33 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 
+# สร้างส่วนหัวโทเคนของบริการสำหรับคำขอทดสอบ
 def service_headers():
     return {"X-LUMA-Service-Token": "test-service-token"}
 
 
+# คำตอบ Forge จำลองสำหรับทดสอบโดยไม่ใช้ GPU
 class FakeForgeResponse:
+    # กำหนดค่าเริ่มต้นของออบเจ็กต์จากพารามิเตอร์หรือค่ากำหนดที่ใช้ในคลาสนี้
     def __init__(self, payload, status_code=200):
         self._payload = payload
         self.status_code = status_code
         self.ok = 200 <= status_code < 300
         self.text = ""
 
+    # คืนข้อมูล JSON จำลองให้โค้ดที่ทดสอบอ่านเหมือนคำตอบจากบริการจริง
     def json(self):
         return self._payload
 
 
+# ทดสอบว่าอ่าน health ได้โดยไม่ต้องใช้โทเคน
 def test_health_is_public(ai_client):
     response = ai_client.get("/health")
     assert response.status_code == 200
     assert response.json()["service"] == "luma-ai"
 
 
+# ทดสอบว่าเอกสาร OpenAPI มีเส้นทางหลักครบตามสัญญา
 def test_fastapi_exposes_the_private_contract_in_openapi(ai_client):
     response = ai_client.get("/openapi.json")
     assert response.status_code == 200
@@ -36,12 +43,14 @@ def test_fastapi_exposes_the_private_contract_in_openapi(ai_client):
     assert {"/health", "/v1/generate", "/v1/edit"} <= set(response.json()["paths"])
 
 
+# ทดสอบว่าAPI ภายในปฏิเสธคำขอที่ไม่มีโทเคนบริการ
 def test_private_endpoint_rejects_missing_token(ai_client):
     response = ai_client.post("/v1/generate", json={"prompt": "a valid prompt"})
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "unauthorized"
 
 
+# ทดสอบว่าภาพทดสอบมีขนาดถูกต้องและให้ไบต์เหมือนเดิมเมื่อใช้ seed เดิม
 def test_generate_returns_repeatable_png(ai_client):
     payload = {"prompt": "a glowing garden at night", "width": 256, "height": 320, "seed": 42}
     first = ai_client.post("/v1/generate", json=payload, headers=service_headers())
@@ -54,6 +63,7 @@ def test_generate_returns_repeatable_png(ai_client):
     assert image.size == (256, 320)
 
 
+# ทดสอบว่าปฏิเสธขนาดภาพที่หารด้วย 64 ไม่ลงตัว
 def test_generation_dimensions_are_validated(ai_client):
     response = ai_client.post(
         "/v1/generate",
@@ -64,6 +74,7 @@ def test_generation_dimensions_are_validated(ai_client):
     assert "divisible by 64" in response.json()["error"]["message"]
 
 
+# ทดสอบว่าการแก้ไขภาพทดสอบส่ง PNG กลับพร้อมขนาดที่คาดหมาย
 def test_edit_returns_png(ai_client, png_bytes):
     response = ai_client.post(
         "/v1/edit",
@@ -76,6 +87,7 @@ def test_edit_returns_png(ai_client, png_bytes):
     assert Image.open(io.BytesIO(response.content)).size == (320, 320)
 
 
+# สร้างค่ากำหนด Forge จำลองเพื่อทดสอบสัญญาการเรียก API
 def forge_app(ai_module):
     return ai_module.create_app(
         {
@@ -96,6 +108,7 @@ def forge_app(ai_module):
     )
 
 
+# จำลองคำตอบ Forge ที่มี Base64 ของภาพและข้อมูล seed
 def forge_image_response(png_bytes, seed=777):
     return FakeForgeResponse(
         {
@@ -105,9 +118,11 @@ def forge_image_response(png_bytes, seed=777):
     )
 
 
+# ทดสอบว่าส่งพารามิเตอร์ไปยัง txt2img และถอดภาพกับ seed จากคำตอบจำลอง
 def test_forge_generate_translates_payload_and_decodes_image(ai_module, png_bytes, monkeypatch):
     captured = {}
 
+    # บันทึกพารามิเตอร์คำขอและตอบภาพจำลองเพื่อไม่ต้องใช้ Forge จริง
     def fake_request(method, url, **kwargs):
         captured.update({"method": method, "url": url, **kwargs})
         return forge_image_response(png_bytes)
@@ -138,9 +153,11 @@ def test_forge_generate_translates_payload_and_decodes_image(ai_module, png_byte
     assert captured["json"]["override_settings"]["sd_model_checkpoint"] == "classroom-model.safetensors"
 
 
+# ทดสอบว่าส่งภาพต้นทางแบบ Base64 และ strength ไปยัง img2img
 def test_forge_edit_sends_base64_source_image(ai_module, png_bytes, monkeypatch):
     captured = {}
 
+    # บันทึกพารามิเตอร์คำขอและตอบภาพจำลองเพื่อไม่ต้องใช้ Forge จริง
     def fake_request(method, url, **kwargs):
         captured.update({"method": method, "url": url, **kwargs})
         return forge_image_response(png_bytes, seed=8)
@@ -160,7 +177,9 @@ def test_forge_edit_sends_base64_source_image(ai_module, png_bytes, monkeypatch)
     assert base64.b64decode(captured["json"]["init_images"][0]).startswith(b"\x89PNG")
 
 
+# ทดสอบว่ารายงาน 503 เมื่อเชื่อมต่อ Forge ไม่ได้
 def test_forge_health_reports_unavailable_provider(ai_module, monkeypatch):
+    # จำลองการติดต่อ Forge ไม่ได้เพื่อตรวจคำตอบ health
     def connection_failed(*_args, **_kwargs):
         raise ai_module.requests.ConnectionError("offline")
 

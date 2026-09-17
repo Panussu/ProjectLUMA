@@ -1,3 +1,4 @@
+# fixture ร่วมของ pytest ใช้ข้อมูลชั่วคราวแทนฐานข้อมูลผู้ใช้จริง
 from __future__ import annotations
 
 import importlib.util
@@ -20,6 +21,7 @@ from luma_backend import create_app as create_backend_app  # noqa: E402
 from luma_backend.extensions import db  # noqa: E402
 
 
+# โหลดโมดูล AI จากเส้นทางไฟล์เพื่อแยกการสร้างแอปทดสอบ
 def load_ai_module():
     spec = importlib.util.spec_from_file_location("luma_ai_app", AI_APP_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -28,22 +30,26 @@ def load_ai_module():
     return module
 
 
+# จัดเตรียมโมดูล AI ให้แต่ละกรณีทดสอบ
 @pytest.fixture()
 def ai_module():
     return load_ai_module()
 
 
+# สร้างแอป AI สำหรับทดสอบด้วยโทเคนที่กำหนดไว้ใน fixture
 @pytest.fixture()
 def ai_app(ai_module):
     return ai_module.create_app({"TESTING": True, "SERVICE_TOKEN": "test-service-token"})
 
 
+# เปิด test client ของ FastAPI และปิดเมื่อจบกรณีทดสอบ
 @pytest.fixture()
 def ai_client(ai_app):
     with TestClient(ai_app) as client:
         yield client
 
 
+# ใช้ฐานข้อมูลและโฟลเดอร์ชั่วคราวสำหรับทดสอบ แล้วล้าง session และตารางเมื่อจบ
 @pytest.fixture()
 def backend_app(tmp_path):
     app = create_backend_app(
@@ -60,6 +66,7 @@ def backend_app(tmp_path):
         }
     )
     with app.app_context():
+        # สร้างตารางที่ยังไม่มี ไม่ใช่เครื่องมือย้ายโครงสร้างฐานข้อมูลเดิม
         db.create_all()
     yield app
     with app.app_context():
@@ -67,18 +74,22 @@ def backend_app(tmp_path):
         db.drop_all()
 
 
+# สร้าง test client ของ Flask เพื่อเรียก API โดยไม่เปิดพอร์ตจริง
 @pytest.fixture()
 def backend_client(backend_app):
     return backend_app.test_client()
 
 
+# สร้างไฟล์ PNG ในหน่วยความจำสำหรับทดสอบอัปโหลดและผลลัพธ์
 @pytest.fixture()
 def png_bytes():
+    # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
     buffer = io.BytesIO()
     Image.new("RGB", (320, 320), "#6546a5").save(buffer, format="PNG")
     return buffer.getvalue()
 
 
+# สมัครบัญชีทดสอบและคืนทั้งข้อมูลผู้ใช้กับโทเคน
 @pytest.fixture()
 def registered_user(backend_client):
     response = backend_client.post(

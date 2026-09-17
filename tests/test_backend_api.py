@@ -1,3 +1,4 @@
+# กรณีทดสอบพฤติกรรมของ backend_api
 from __future__ import annotations
 
 import io
@@ -5,7 +6,9 @@ import io
 from luma_backend import worker
 
 
+# คำตอบภาพ AI จำลองสำหรับทดสอบ Backend
 class FakeAiResponse:
+    # กำหนดค่าเริ่มต้นของออบเจ็กต์จากพารามิเตอร์หรือค่ากำหนดที่ใช้ในคลาสนี้
     def __init__(self, image: bytes):
         self.status_code = 200
         self.ok = True
@@ -17,14 +20,17 @@ class FakeAiResponse:
             "X-LUMA-Provider": "test-provider",
         }
 
+    # คืนข้อมูล JSON จำลองให้โค้ดที่ทดสอบอ่านเหมือนคำตอบจากบริการจริง
     def json(self):
         return {}
 
 
+# สร้างส่วนหัว Bearer token สำหรับผู้ใช้ในชุดทดสอบ
 def authorization(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+# ทดสอบว่าปฏิเสธชื่อซ้ำและเข้าสู่ระบบได้โดยไม่สนตัวพิมพ์ของชื่อ
 def test_registration_login_and_current_user(backend_client, registered_user):
     duplicate = backend_client.post(
         "/api/v1/auth/register",
@@ -43,12 +49,14 @@ def test_registration_login_and_current_user(backend_client, registered_user):
     assert me.get_json()["user"]["username"] == "student.one"
 
 
+# ทดสอบว่าปฏิเสธชื่อหรือรหัสผ่านที่ไม่ผ่านเงื่อนไขสมัครสมาชิก
 def test_invalid_registration_is_rejected(backend_client):
     response = backend_client.post("/api/v1/auth/register", json={"username": "x", "password": "short"})
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "validation_error"
 
 
+# ทดสอบว่างานสร้างภาพจำลองเสร็จและดาวน์โหลดผ่านลิงก์มีลายเซ็นได้
 def test_generate_job_completes_and_media_link_works(backend_client, registered_user, png_bytes, monkeypatch):
     monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: FakeAiResponse(png_bytes))
     token = registered_user["token"]
@@ -72,6 +80,7 @@ def test_generate_job_completes_and_media_link_works(backend_client, registered_
     assert media.data == png_bytes
 
 
+# ทดสอบว่ารับภาพที่ถูกต้องและเปลี่ยนงานแก้ไขเป็น completed
 def test_edit_job_accepts_valid_image(backend_client, registered_user, png_bytes, monkeypatch):
     monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: FakeAiResponse(png_bytes))
     created = backend_client.post(
@@ -86,6 +95,7 @@ def test_edit_job_accepts_valid_image(backend_client, registered_user, png_bytes
     assert result.get_json()["job"]["status"] == "completed"
 
 
+# ทดสอบว่าผู้ใช้คนอื่นอ่านงานของเจ้าของเดิมไม่ได้
 def test_jobs_are_isolated_between_users(backend_client, registered_user, png_bytes, monkeypatch):
     monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: FakeAiResponse(png_bytes))
     first_token = registered_user["token"]
@@ -104,6 +114,7 @@ def test_jobs_are_isolated_between_users(backend_client, registered_user, png_by
     assert forbidden.status_code == 404
 
 
+# ทดสอบว่าเส้นทางข้อมูลส่วนตัวปฏิเสธคำขอที่ไม่ยืนยันตัวตน
 def test_protected_routes_require_authentication(backend_client):
     response = backend_client.get("/api/v1/jobs")
     assert response.status_code == 401
