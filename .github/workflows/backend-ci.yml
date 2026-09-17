@@ -1,4 +1,7 @@
+# ชื่อ workflow ที่แสดงใน GitHub Actions
 name: Backend checks
+
+# เหตุการณ์ push หรือ pull request ที่สั่งให้ตรวจโค้ด
 
 on:
   push:
@@ -10,21 +13,32 @@ on:
       - "requirements-dev.txt"
       - "pytest.ini"
 
+# งานตรวจอัตโนมัติที่รันในสภาพแวดล้อม CI
+
 jobs:
+  # เตรียม Python และรันชุดทดสอบของสาขานี้
   test:
     runs-on: ubuntu-latest
     steps:
+      # ดึงโค้ดของรุ่นที่กำลังตรวจ
       - uses: actions/checkout@v4
+      # เตรียมเวอร์ชัน Python และแคชการติดตั้งไลบรารี
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      # ติดตั้งไลบรารีแอปและเครื่องมือทดสอบ
       - run: pip install -r requirements-dev.txt
+      # เรียกกรณีทดสอบและให้ CI ล้มเหลวเมื่อมีข้อผิดพลาด
       - run: pytest
+      # ตรวจว่าไฟล์ Python แปลเป็น bytecode ได้
       - run: python -m compileall -q backend tests
+
+  # สร้างอิมเมจ Backend เพื่อตรวจ Dockerfile และการติดตั้งไลบรารี
 
   container:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # ตรวจการตั้งค่าหรือสร้างอิมเมจตามคำสั่งของงานนี้
       - run: docker build -t luma-backend ./backend

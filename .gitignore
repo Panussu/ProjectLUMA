@@ -1,21 +1,29 @@
+# ยกเว้นค่าลับและสภาพแวดล้อมในเครื่อง
 .env
+# ยกเว้น Python environment ที่สร้างใหม่ได้
 .venv/
 venv/
+# ยกเว้นไฟล์แคชและผลการทดสอบ
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .coverage
 htmlcov/
+# ยกเว้นฐานข้อมูลจริงและข้อมูลผู้ใช้
 *.db
 *.sqlite
 *.sqlite3
+# ยกเว้นข้อมูลขณะรันและภาพผลลัพธ์
 backend/instance/
+# ไม่นำข้อมูลผู้ใช้และผลลัพธ์ขณะรันเข้าอิมเมจ
 backend/data/
 backend/media/
 backend/backups/
 ai-engine/output/
 ai-engine/uploads/
+# ยกเว้นไลบรารี JavaScript ที่ติดตั้งในเครื่อง
 node_modules/
+# ยกเว้นไฟล์เฉพาะระบบปฏิบัติการและตัวแก้ไข
 .DS_Store
 Thumbs.db
 .idea/

@@ -1,3 +1,4 @@
+# กรณีทดสอบพฤติกรรมของ maintenance
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from luma_backend.maintenance import backup_backend, cleanup_expired_jobs
 from luma_backend.models import Job, User
 
 
+# สร้างงานที่เสร็จแล้วพร้อมไฟล์และอายุที่เลือกได้สำหรับทดสอบการเก็บรักษา
 def persisted_completed_job(backend_app, age_days: int = 0) -> tuple[str, Path]:
     media_path = Path(backend_app.config["MEDIA_ROOT"]) / "completed.png"
     media_path.write_bytes(b"stored-result")
@@ -19,6 +21,7 @@ def persisted_completed_job(backend_app, age_days: int = 0) -> tuple[str, Path]:
         user.set_password("correct-horse-battery")
         db.session.add(user)
         db.session.flush()
+        # สร้างระเบียนงานที่ผูกกับผู้ใช้และค่าที่ตรวจสอบแล้ว
         job = Job(
             user_id=user.id,
             type="generate",
@@ -33,6 +36,7 @@ def persisted_completed_job(backend_app, age_days: int = 0) -> tuple[str, Path]:
     return job_id, media_path
 
 
+# ทดสอบว่าสำเนาสำรองมีฐานข้อมูล ภาพ และรายการกำกับที่อ่านกลับได้
 def test_backup_contains_database_media_and_manifest(backend_app, tmp_path):
     persisted_completed_job(backend_app)
 
@@ -40,6 +44,7 @@ def test_backup_contains_database_media_and_manifest(backend_app, tmp_path):
 
     assert (backup_path / "luma.db").is_file()
     assert (backup_path / "media" / "completed.png").read_bytes() == b"stored-result"
+    # เก็บข้อมูลกำกับสำเนาสำรองเพื่อใช้ตรวจไฟล์และเวลาที่สร้าง
     manifest = json.loads((backup_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["media_files"] == 1
     connection = sqlite3.connect(backup_path / "luma.db")
@@ -49,6 +54,7 @@ def test_backup_contains_database_media_and_manifest(backend_app, tmp_path):
         connection.close()
 
 
+# ทดสอบว่าดูรายการก่อนลบได้ และการยืนยันลบจึงนำระเบียนกับไฟล์ออก
 def test_cleanup_previews_before_deleting_expired_jobs(backend_app):
     job_id, media_path = persisted_completed_job(backend_app, age_days=31)
 
@@ -70,6 +76,7 @@ def test_cleanup_previews_before_deleting_expired_jobs(backend_app):
         assert db.session.get(Job, job_id) is None
 
 
+# ทดสอบว่าปฏิเสธสำรองลงใน media เพื่อไม่คัดลอกซ้อนตัวเอง
 @pytest.mark.parametrize("subdirectory", ["", "backups"])
 def test_backup_rejects_destination_inside_media(backend_app, subdirectory):
     persisted_completed_job(backend_app)

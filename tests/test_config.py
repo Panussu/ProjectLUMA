@@ -1,3 +1,4 @@
+# กรณีทดสอบพฤติกรรมของ config
 from __future__ import annotations
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from luma_backend import create_app
 
 
+# ทดสอบว่าโหมด VLAN ปฏิเสธค่าความลับตัวอย่างและค่าติดตั้งไม่ปลอดภัย
 def test_vlan_mode_rejects_placeholder_secrets(tmp_path):
     with pytest.raises(RuntimeError, match="Unsafe backend configuration"):
         create_app(
@@ -23,6 +25,7 @@ def test_vlan_mode_rejects_placeholder_secrets(tmp_path):
         )
 
 
+# ทดสอบว่าเริ่มโหมด VLAN ได้เมื่อกำหนดความลับและที่อยู่ครบถ้วน
 def test_vlan_mode_accepts_explicit_safe_settings(tmp_path):
     app = create_app(
         {

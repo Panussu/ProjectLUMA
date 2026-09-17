@@ -1,3 +1,4 @@
+# fixture ร่วมของ pytest ใช้ข้อมูลชั่วคราวแทนฐานข้อมูลผู้ใช้จริง
 from __future__ import annotations
 
 import io
@@ -9,6 +10,7 @@ from luma_backend import create_app
 from luma_backend.extensions import db
 
 
+# ใช้ฐานข้อมูลและโฟลเดอร์ชั่วคราวสำหรับทดสอบ แล้วล้าง session และตารางเมื่อจบ
 @pytest.fixture()
 def backend_app(tmp_path):
     app = create_app(
@@ -31,18 +33,22 @@ def backend_app(tmp_path):
         db.drop_all()
 
 
+# สร้าง test client ของ Flask เพื่อเรียก API โดยไม่เปิดพอร์ตจริง
 @pytest.fixture()
 def backend_client(backend_app):
     return backend_app.test_client()
 
 
+# สร้างไฟล์ PNG ในหน่วยความจำสำหรับทดสอบอัปโหลดและผลลัพธ์
 @pytest.fixture()
 def png_bytes():
+    # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
     buffer = io.BytesIO()
     Image.new("RGB", (64, 64), "#6544cc").save(buffer, format="PNG")
     return buffer.getvalue()
 
 
+# สมัครบัญชีทดสอบและคืนทั้งข้อมูลผู้ใช้กับโทเคน
 @pytest.fixture()
 def registered_user(backend_client):
     response = backend_client.post(

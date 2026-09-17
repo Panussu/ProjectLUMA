@@ -1,3 +1,4 @@
+# กรณีทดสอบพฤติกรรมของ recovery
 from __future__ import annotations
 
 from luma_backend import create_app, worker
@@ -5,6 +6,7 @@ from luma_backend.extensions import db
 from luma_backend.models import Job, User
 
 
+# สร้างค่าทดสอบที่ใช้ฐานข้อมูลเดิมร่วมกันขณะจำลองการเริ่มบริการใหม่
 def config_for(tmp_path, recover: bool) -> dict:
     return {
         "TESTING": True,
@@ -20,6 +22,7 @@ def config_for(tmp_path, recover: bool) -> dict:
     }
 
 
+# บันทึกงานก่อนรีสตาร์ตจำลองเพื่อทดสอบการกู้สถานะ
 def create_persisted_job(tmp_path, status: str) -> str:
     app = create_app(config_for(tmp_path, recover=False))
     with app.app_context():
@@ -27,6 +30,7 @@ def create_persisted_job(tmp_path, status: str) -> str:
         user.set_password("correct-horse-battery")
         db.session.add(user)
         db.session.flush()
+        # สร้างระเบียนงานที่ผูกกับผู้ใช้และค่าที่ตรวจสอบแล้ว
         job = Job(user_id=user.id, type="generate", status=status, prompt="recover this job")
         db.session.add(job)
         db.session.commit()
@@ -35,6 +39,7 @@ def create_persisted_job(tmp_path, status: str) -> str:
     return job_id
 
 
+# ทดสอบว่าเริ่มใหม่แล้วปิดงาน processing ที่ถูกขัดจังหวะเป็น failed
 def test_startup_marks_interrupted_processing_job_failed(tmp_path):
     job_id = create_persisted_job(tmp_path, "processing")
 
@@ -46,6 +51,7 @@ def test_startup_marks_interrupted_processing_job_failed(tmp_path):
         assert "restarted" in job.error
 
 
+# ทดสอบว่าเริ่มใหม่แล้วส่งงาน queued ที่บันทึกไว้กลับเข้าคิว
 def test_startup_requeues_persisted_queued_job(tmp_path, monkeypatch):
     job_id = create_persisted_job(tmp_path, "queued")
     recovered: list[str] = []
