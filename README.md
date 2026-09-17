@@ -1,86 +1,73 @@
 # Project LUMA
 
-LUMA (Learning-based Universal Media Artist) is a distributed web application for creating and editing images through an AI service. The classroom deployment runs across three computers on the same VLAN.
+LUMA (Learning-based Universal Media Artist) เป็นเว็บแอปพลิเคชันสำหรับสร้างภาพจากข้อความและแก้ไขภาพผ่านบริการ AI ระบบสาธิตใช้คอมพิวเตอร์ 3 เครื่องใน VLAN เดียวกัน ผู้ใช้สั่งงานและติดตามผลผ่านเบราว์เซอร์
 
-## Architecture
+## สถาปัตยกรรม
 
-| Computer | Default address | Responsibilities |
+| เครื่อง | IP ตัวอย่าง | หน้าที่ |
 | --- | --- | --- |
-| PC 2: Frontend | `192.168.1.10` | Nginx reverse proxy and static HTML/CSS/JavaScript |
-| PC 3: Backend | `192.168.1.20` | Flask API, authentication, job queue, image storage, and SQLite |
-| PC 1: AI server | `192.168.1.30` | FastAPI wrapper plus WebUI Forge on localhost |
+| PC 1 ฝั่ง AI | `192.168.1.30` | FastAPI รับคำขอจาก Flask แล้วเรียก WebUI Forge บนเครื่องเดียวกัน |
+| PC 2 ฝั่งหน้าเว็บ | `192.168.1.10` | Nginx ให้บริการ HTML/CSS/JavaScript และส่งต่อคำขอ API กับภาพ |
+| PC 3 ฝั่ง Backend | `192.168.1.20` | Flask จัดการผู้ใช้ JWT คิวงาน ไฟล์ภาพ และ SQLite |
 
-All addresses and ports are configurable. For local development, every service can run on one computer.
+IP และพอร์ตปรับได้ตามเครือข่ายจริง ตรวจด้วย `ipconfig` ก่อนใช้ สำหรับพัฒนาในเครื่องเดียวให้เปิดทุกบริการบนเครื่องเดียวได้
 
-```text
-Browser
-   |
-   v
-Nginx :80
-   |-- /                 -> static frontend
-   |-- /api/             -> Flask backend :5000
-   |-- /media/           -> Flask backend :5000
-   `-- /health           -> Flask backend :5000
-                              |
-                              `-- AI service :8000
-```
+ผู้ใช้ → Nginx พอร์ต 80 → Flask พอร์ต 5000 → FastAPI พอร์ต 8000 → Forge พอร์ต 7860
 
-SQLite is the default database because it needs no separate database computer. PostgreSQL can be selected later through `DATABASE_URL` without changing the API.
+Flask ดูแลบัญชีและวงจรชีวิตงาน ส่วน FastAPI แปลงคำขอให้ Forge ประมวลผลโมเดล เมื่อได้ภาพ Flask จะเก็บไฟล์แล้วส่งลิงก์ให้เบราว์เซอร์โหลดผ่าน Nginx
 
-## Repository layout
+SQLite เป็นฐานข้อมูลเริ่มต้นเพราะไม่ต้องมีเครื่องแยก หากเปลี่ยนเป็น PostgreSQL ต้องกำหนด `DATABASE_URL` ติดตั้งไดรเวอร์ที่เกี่ยวข้อง และเตรียมฐานข้อมูลให้พร้อม
 
-```text
-frontend/       Browser interface
-backend/        Flask API, authentication, database, and jobs
-ai-engine/      Replaceable image-generation/editing service
-nginx/          Reverse-proxy configuration
-docs/           Architecture, API contract, and deployment guides
-scripts/        PowerShell development scripts
-tests/          Integration checks
-```
+## โครงสร้างคลังโค้ด
 
-## Shared API contract
-
-The browser calls only Nginx using same-origin URLs beginning with `/api/v1`. It must not call the Flask or AI computer directly.
-
-| Method and path | Authentication | Purpose |
-| --- | --- | --- |
-| `GET /api/v1/health` | No | Backend and dependency health |
-| `POST /api/v1/auth/register` | No | Create a user account |
-| `POST /api/v1/auth/login` | No | Obtain an access token |
-| `GET /api/v1/auth/me` | Bearer token | Read the current user |
-| `POST /api/v1/jobs/generate` | Bearer token | Queue image generation |
-| `POST /api/v1/jobs/edit` | Bearer token | Upload and queue an image edit |
-| `GET /api/v1/jobs` | Bearer token | List the current user's jobs |
-| `GET /api/v1/jobs/{id}` | Bearer token | Read progress or result |
-| `GET /media/{filename}` | Bearer token or signed URL | Download a result image |
-
-Generation and editing are asynchronous. A successful `POST` returns HTTP `202` and a job with status `queued`. The frontend polls `GET /api/v1/jobs/{id}` until its status becomes `completed` or `failed`.
-
-The AI service is private and called only by the backend:
-
-| Method and path | Purpose |
+| โฟลเดอร์ | เนื้อหา |
 | --- | --- |
-| `GET /health` | AI service health |
-| `POST /v1/generate` | Generate an image |
-| `POST /v1/edit` | Edit an uploaded image |
+| `frontend/` | หน้าเว็บ การส่งคำขอ การเข้าสู่ระบบ และแสดงภาพ |
+| `backend/` | Flask การยืนยันตัวตน ฐานข้อมูล และคิวงาน |
+| `ai-engine/` | FastAPI เชื่อม Forge และ provider สำหรับทดสอบ |
+| `nginx/` | การให้บริการไฟล์และเส้นทาง reverse proxy |
+| `docs/` | สถาปัตยกรรม สัญญา API การติดตั้ง และแผนทดสอบ |
+| `scripts/` | PowerShell สำหรับเริ่มบริการและตรวจเครือข่าย |
+| `tests/` | กรณีทดสอบ API และบริการจำลอง |
 
-See [docs/API_CONTRACT.md](docs/API_CONTRACT.md) for request and response examples, ownership rules, limits, and error behavior.
+คอมเมนต์ภาษาไทยในโค้ดอธิบายหน้าที่ของแต่ละส่วน ชื่อฟังก์ชัน ตัวแปร และเส้นทางยังตรงกับโปรแกรมเพื่อให้ค้นหาและพัฒนาร่วมกันได้
 
-## Quick start on one computer
+## สัญญา API
 
-Requirements: Python 3.11 or newer. Nginx is optional for local development.
+เมื่อติดตั้งผ่าน Nginx เบราว์เซอร์เรียก `/api/v1` บน origin เดียวกับเว็บไซต์ แล้ว Nginx ส่งต่อไปยัง Flask กรณีพัฒนาโดยเปิดเว็บพอร์ต 8080 จะเรียก Flask บน localhost โดยตรง
 
-1. Copy each environment example.
+| เมธอดและเส้นทาง | การยืนยันตัวตน | หน้าที่ |
+| --- | --- | --- |
+| `GET /api/v1/health` | ไม่ต้องใช้ | ตรวจ Backend และบริการที่พึ่งพา |
+| `POST /api/v1/auth/register` | ไม่ต้องใช้ | สมัครบัญชี |
+| `POST /api/v1/auth/login` | ไม่ต้องใช้ | เข้าสู่ระบบและรับ JWT |
+| `GET /api/v1/auth/me` | Bearer token | อ่านผู้ใช้ปัจจุบัน |
+| `POST /api/v1/jobs/generate` | Bearer token | ส่งงานสร้างภาพ |
+| `POST /api/v1/jobs/edit` | Bearer token | อัปโหลดและส่งงานแก้ไขภาพ |
+| `GET /api/v1/jobs` | Bearer token | อ่านงานของผู้ใช้ปัจจุบัน |
+| `GET /api/v1/jobs/{id}` | Bearer token | อ่านสถานะและลิงก์ผลลัพธ์ |
+| `GET /media/{filename}` | ลิงก์ที่มีลายเซ็นใน main รุ่นนี้ | ดาวน์โหลดภาพ |
+
+คำขอสร้างและแก้ไขภาพตอบ HTTP `202` เมื่อรับงานแล้ว Frontend ตรวจสถานะซ้ำประมาณทุก 1.5 วินาทีจนเป็น `completed` หรือ `failed` คิวใช้ thread pool ภายใน Flask จึงควรเปิด Backend เพียง 1 โปรเซสในการสาธิต
+
+API ภายใน FastAPI มี `GET /health`, `POST /v1/generate` และ `POST /v1/edit` การสร้างและแก้ไขภาพต้องแนบ `X-LUMA-Service-Token` ซึ่งแยกจาก JWT ของผู้ใช้
+
+ดูตัวอย่างใน [สัญญา API](docs/API_CONTRACT.md) ความสามารถใหม่บนสาขา Backend เช่น การดาวน์โหลดด้วย JWT และการกู้คิว ยังต้องรวมและทดสอบกับ main ก่อนใช้ในระบบรวม
+
+## เริ่มทดสอบในเครื่องเดียว
+
+ต้องมี Python 3.11 ขึ้นไป สำหรับโหมดพัฒนาไม่จำเป็นต้องติดตั้ง Nginx
+
+1. เปิด PowerShell ที่โฟลเดอร์โครงงาน สร้างไฟล์กำหนดค่าเมื่อยังไม่มี หากมี `.env` แล้วให้แก้ไฟล์เดิม
 
    ```powershell
    Copy-Item backend/.env.example backend/.env
    Copy-Item ai-engine/.env.example ai-engine/.env
    ```
 
-2. In Stability Matrix, launch Stable Diffusion WebUI Forge with `--api --port 7860`. For testing without Forge, change `AI_PROVIDER` in `ai-engine/.env` to `development-procedural`.
-
-3. Start the LUMA AI wrapper, backend, and frontend in separate PowerShell terminals.
+2. ตั้ง `AI_SERVICE_TOKEN` ให้ตรงกันทั้งสองไฟล์ กำหนด `SECRET_KEY` และ `JWT_SECRET_KEY` ของ Backend เป็นค่าสุ่มคนละค่า
+3. เปิด WebUI Forge ผ่าน Stability Matrix พร้อม `--api --port 7860` หากทดสอบโดยไม่ใช้ Forge ให้ตั้ง `AI_PROVIDER=development-procedural` ใน `ai-engine/.env`
+4. เปิด PowerShell แยก 3 หน้าต่าง แล้วเรียกหน้าต่างละคำสั่ง
 
    ```powershell
    ./scripts/run-ai.ps1
@@ -88,47 +75,71 @@ Requirements: Python 3.11 or newer. Nginx is optional for local development.
    ./scripts/run-frontend.ps1
    ```
 
-4. Open `http://localhost:8080`.
+5. เปิด `http://localhost:8080` สมัครสมาชิก เข้าสู่ระบบ แล้วทดลองสร้างและแก้ไขภาพ
 
-For local development, the frontend development server sends API requests to `http://localhost:5000`. In the deployed system, Nginx provides one public origin and forwards the requests.
+สคริปต์บริการสร้าง `.venv` และติดตั้งไลบรารีให้ Frontend โหมดนี้เรียก `http://localhost:5000` จึงเหมาะกับการเปิดทุกบริการบนเครื่องเดียว
 
-## Docker quick start
+## ทดสอบด้วย Docker
+
+เปิด Docker Desktop ให้พร้อม แล้วรันจากโฟลเดอร์โครงงาน
 
 ```powershell
 docker compose up --build
 ```
 
-Open `http://localhost`. Runtime data is stored in Docker volumes.
+เปิด `http://localhost` ข้อมูลขณะใช้งานอยู่ใน Docker volumes ค่า Compose ปัจจุบันใช้ `development-procedural` เพื่อทดสอบระบบโดยไม่ใช้โมเดลหรือ GPU
 
-## Three-computer same-VLAN deployment
+## ติดตั้งบน 3 เครื่องใน VLAN เดียวกัน
 
-All three computers must be connected to the same trusted classroom VLAN. The `192.168.1.x` addresses are proposed defaults; confirm and replace them using `ipconfig`. This profile does not require Tailscale, public IP addresses, or router port forwarding.
+ทั้งสามเครื่องต้องติดต่อกันได้ใน VLAN ของห้องเรียน ไม่ต้องใช้ Tailscale หรือ port forwarding ออกอินเทอร์เน็ต IP `192.168.1.x` เป็นตัวอย่าง ให้แทนด้วย IP จริง
 
-1. On PC 1, copy `ai-engine/.env.vlan.example` to `ai-engine/.env`, start Forge, and run FastAPI on port `8000`.
-2. On PC 3, copy `backend/.env.vlan.example` to `backend/.env`, run Flask on port `5000`, and keep SQLite on that computer.
-3. On PC 2, serve the frontend through Nginx on port `80` and route `/api` and `/media` to PC 3.
-4. Use the same `AI_SERVICE_TOKEN` on PC 1 and PC 3.
-5. Allow only the required connections through Windows Firewall: PC 3 to PC 1 port `8000`, PC 2 to PC 3 port `5000`, and classroom clients to PC 2 port `80`.
-6. Start services in order: Forge, FastAPI, Flask, then Nginx.
-7. Run the acceptance checks in `docs/TEST_PLAN.md` before the demonstration.
+1. PC 1 สร้าง `ai-engine/.env` จาก `.env.vlan.example` แก้โทเคน เปิด Forge บน localhost แล้วเริ่ม FastAPI พอร์ต `8000`
+2. PC 3 สร้าง `backend/.env` จาก `.env.vlan.example` แก้กุญแจและ `AI_SERVICE_URL` ให้ชี้ PC 1 เปิด Flask พอร์ต `5000` และเก็บ SQLite บน PC 3
+3. PC 2 ติดตั้ง Nginx ตั้ง root ไปที่ Frontend จริงและ upstream ไปที่ PC 3 วาง `nginx.conf` กับ `luma.conf` ในโฟลเดอร์กำหนดค่าเดียวกัน แล้วตรวจด้วย `nginx.exe -t`
+4. ตรวจว่า `AI_SERVICE_TOKEN` ของ PC 1 และ PC 3 ตรงกัน
+5. อนุญาตไฟร์วอลล์ตามเส้นทาง PC 3 → PC 1 พอร์ต `8000`, PC 2 → PC 3 พอร์ต `5000` และเครื่องผู้ใช้ → PC 2 พอร์ต `80`
+6. เริ่มตามลำดับ Forge → FastAPI → Flask → Nginx แล้วเปิดเว็บด้วย IP ของ PC 2
+7. ตรวจการสมัครสมาชิก สร้างภาพ แก้ไขภาพ ดาวน์โหลด และแยกสิทธิ์ระหว่างบัญชีตาม [แผนทดสอบ](docs/TEST_PLAN.md)
 
-Use [PROJECTLUMA_3PC_TEST_GUIDE.md](PROJECTLUMA_3PC_TEST_GUIDE.md) as the standalone setup and test checklist to share with group members. Additional deployment notes are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+ใช้ [คู่มือทดสอบ 3 เครื่อง](PROJECTLUMA_3PC_TEST_GUIDE.md) ส่งให้สมาชิก และอ่าน [รายละเอียดการติดตั้ง](docs/DEPLOYMENT.md) เพิ่มเติม
 
-## Branch ownership
+## การแบ่งงานและสาขา
 
-The remote repository contains `Frontend`, `Backend`, `AiEngine`, `Routing`, and `QA` branches. `main` is the integration branch and contains the shared API contract. Feature work should be committed in small, focused commits and merged into `main` only after its tests pass.
+| สาขา | งาน |
+| --- | --- |
+| `Frontend` | หน้าเว็บ HTML/CSS/JavaScript บน PC 2 |
+| `Backend` | Flask ผู้ใช้ งาน SQLite และไฟล์ภาพบน PC 3 |
+| `AiEngine` | FastAPI การเรียก Forge และโมเดลบน PC 1 |
+| `Routing` | Nginx และเส้นทางคำขอบน PC 2 |
+| `QA` | ชุดทดสอบ CI และการตรวจระบบร่วมกัน |
+| `main` | โค้ดรวมสำหรับทดสอบครบระบบ |
 
-## Current AI provider
+แยกคอมมิตตามส่วนงานและรวมเข้า main เมื่อผ่านการตรวจ หมายเลขสมาชิกไม่ต้องตรงกับหมายเลข PC ผู้ดูแล Frontend และ Routing ใช้เครื่องให้บริการเดียวกันได้ ส่วน QA ตรวจทั้งระบบ
 
-The normal provider is Stable Diffusion WebUI Forge installed and launched through Stability Matrix. The LUMA AI wrapper converts the stable `/v1/generate` and `/v1/edit` contract into Forge `/sdapi/v1/txt2img` and `/sdapi/v1/img2img` requests.
+## Forge และบริการ AI
 
-The private AI wrapper uses FastAPI and runs with Uvicorn on port 8000. Its interactive API documentation is available at `http://127.0.0.1:8000/docs` on the AI computer. The main user API, authentication, jobs, and SQLite database remain in the Flask backend on port 5000.
+Stability Matrix ใช้ติดตั้งและเปิด Stable Diffusion WebUI Forge ตัว FastAPI แปลง `/v1/generate` เป็น `/sdapi/v1/txt2img` และ `/v1/edit` เป็น `/sdapi/v1/img2img` จากนั้นถอด Base64 ของภาพแล้วส่ง PNG ให้ Flask
 
-A lightweight procedural provider remains available for development, automated tests, and Docker demonstrations without a GPU. It is not a trained generative model and must not be presented as one.
+FastAPI ทำงานผ่าน Uvicorn พอร์ต 8000 มีหน้าเอกสาร `http://127.0.0.1:8000/docs` บน PC 1 ส่วน Flask ใช้พอร์ต 5000 ดูแลบัญชี งาน และ SQLite อ่าน [คู่มือ AI](ai-engine/README.md) และ [คู่มือ Backend](backend/README.md) เพิ่มเติม
 
-## Security notes
+provider `development-procedural` ใช้ Pillow วาดภาพตัวอย่างและเอฟเฟกต์พื้นฐานสำหรับพัฒนาและทดสอบ ผลที่ได้จึงไม่ใช่ภาพจากโมเดล Generative AI ที่ผ่านการฝึก
 
-- Do not commit `.env` files, tokens, passwords, databases, uploads, or generated images.
-- The backend limits upload size and validates image types.
-- The AI service requires a shared service token.
-- Use HTTPS when the application leaves a trusted classroom LAN.
+## การตรวจโค้ด
+
+ติดตั้งไลบรารีใน environment สำหรับพัฒนาแล้วตรวจจากโฟลเดอร์โครงงาน
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest
+node --check frontend/assets/app.js
+docker compose config --quiet
+```
+
+ชุดทดสอบใช้บริการจำลอง จึงต้องทดสอบ Forge จริงและการส่งภาพข้าม 3 เครื่องก่อนสาธิตด้วย
+
+## การดูแลค่าลับและข้อมูล
+
+- ไม่เก็บ `.env` โทเคน รหัสผ่าน ฐานข้อมูล ภาพอัปโหลด หรือผลลัพธ์ลง Git
+- Backend จำกัดขนาดอัปโหลดและตรวจรูปแบบภาพ
+- จำกัดผู้ที่ติดต่อ FastAPI และเก็บ Forge บน localhost ของ PC 1
+- HTTP ในการตั้งค่านี้ไม่ได้เข้ารหัสข้อมูลระหว่างส่ง หากใช้นอกเครือข่ายที่เชื่อถือได้ต้องเตรียม HTTPS
