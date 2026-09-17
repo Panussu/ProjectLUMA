@@ -1,28 +1,43 @@
+# ชื่อ workflow ที่แสดงใน GitHub Actions
 name: LUMA checks
+
+# เหตุการณ์ push หรือ pull request ที่สั่งให้ตรวจโค้ด
 
 on:
   push:
   pull_request:
 
+# งานตรวจอัตโนมัติที่รันในสภาพแวดล้อม CI
+
 jobs:
+  # เตรียม Python และรันชุดทดสอบของสาขานี้
   test:
     runs-on: ubuntu-latest
     steps:
+      # ดึงโค้ดของรุ่นที่กำลังตรวจ
       - uses: actions/checkout@v4
+      # เตรียมเวอร์ชัน Python และแคชการติดตั้งไลบรารี
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      # ติดตั้งไลบรารีแอปและเครื่องมือทดสอบ
       - run: pip install -r requirements-dev.txt
+      # เรียกกรณีทดสอบและให้ CI ล้มเหลวเมื่อมีข้อผิดพลาด
       - run: pytest
+      # เตรียม Node สำหรับตรวจ JavaScript
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # ตรวจไวยากรณ์ JavaScript โดยไม่เปิดเบราว์เซอร์
       - run: node --check frontend/assets/app.js
+
+  # ตรวจความถูกต้องของค่ากำหนด Compose โดยยังไม่เริ่มบริการ
 
   compose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # ตรวจการตั้งค่าหรือสร้างอิมเมจตามคำสั่งของงานนี้
       - run: docker compose config --quiet
 
