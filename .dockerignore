@@ -1,12 +1,16 @@
+# ไม่นำประวัติ Git เข้า Docker build context
 .git
 .github
+# ไม่นำ environment แคช และความลับเข้าอิมเมจ
 **/.venv
 **/__pycache__
 **/.pytest_cache
 **/.env
+# ไม่นำข้อมูลผู้ใช้และผลลัพธ์ขณะรันเข้าอิมเมจ
 backend/data
 backend/media
 ai-engine/output
+# ยกเว้นชุดทดสอบและเอกสารจากอิมเมจบริการ
 tests
 docs
 

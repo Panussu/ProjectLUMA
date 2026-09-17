@@ -1,4 +1,6 @@
+# บริการที่ Compose เชื่อมด้วยชื่อภายในเครือข่ายเดียวกัน
 services:
+  # บริการ AI ใช้ provider ทดสอบตามค่าด้านล่าง
   ai-engine:
     build: ./ai-engine
     environment:
@@ -9,10 +11,13 @@ services:
     expose:
       - "8000"
     healthcheck:
+      # เตรียม Python และรันชุดทดสอบของสาขานี้
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Flask เชื่อม AI และจัดเก็บฐานข้อมูลกับภาพใน volume
 
   backend:
     build: ./backend
@@ -27,6 +32,7 @@ services:
       DATA_ROOT: /data
       MEDIA_ROOT: /media
       CORS_ORIGINS: http://localhost
+    # พื้นที่จัดเก็บถาวรหรือการเชื่อม volume ของบริการตามระดับของบล็อก
     volumes:
       - luma-data:/data
       - luma-media:/media
@@ -40,6 +46,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Nginx เปิดพอร์ตหน้าเว็บออกสู่เครื่อง host
 
   frontend:
     build:
