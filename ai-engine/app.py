@@ -11,13 +11,14 @@ import logging
 import os
 import random
 import textwrap
+from pathlib import Path
 from typing import Annotated, Any
 
 import requests
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -97,6 +98,11 @@ class GenerateRequest(BaseModel):
     height: int = 512
     seed: int | None = None
     steps: int = 20
+    model: str | None = None
+    loras: list | None = None
+    sampler: str | None = None
+    cfg_scale: float | None = None
+
 
     # ตรวจ prompt ผ่านกฎกลางก่อนสร้างโมเดลคำขอ
     @field_validator("prompt", mode="before")
@@ -136,6 +142,33 @@ class GenerateRequest(BaseModel):
     def validate_steps(cls, value: Any) -> int:
         return parse_integer(value, "steps", 1, 50)
 
+    @field_validator("model", mode="before")
+    @classmethod
+    def validate_model(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        return str(value).strip()
+
+    @field_validator("sampler", mode="before")
+    @classmethod
+    def validate_sampler(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        return str(value).strip()
+
+    @field_validator("cfg_scale", mode="before")
+    @classmethod
+    def validate_cfg_scale(cls, value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            val = float(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("cfg_scale must be a number.") from exc
+        if not 1.0 <= val <= 30.0:
+            raise ValueError("cfg_scale must be between 1.0 and 30.0.")
+        return val
+
 
 # ตรวจชื่อ provider ว่าต้องเรียก Forge หรือใช้ตัวสร้างภาพทดสอบ
 def is_forge_provider(config: dict[str, Any]) -> bool:
@@ -172,15 +205,120 @@ def forge_request(config: dict[str, Any], method: str, endpoint: str, **kwargs) 
     return response
 
 
-# ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler และ checkpoint ที่เลือกได้
-def forge_payload(config: dict[str, Any], prompt: str, seed: int, steps: int) -> dict[str, Any]:
-    # ขอภาพครั้งละหนึ่งภาพและให้ LUMA รับข้อมูลกลับไปจัดเก็บ
+# อ่านข้อมูลเมทาดาต้าจากไฟล์ .cm-info.json ของ Stability Matrix
+def read_cm_info(file_path: Path) -> dict[str, Any]:
+    for candidate in (
+        file_path.with_name(f"{file_path.name}.cm-info.json"),
+        file_path.with_name(f"{file_path.stem}.cm-info.json"),
+    ):
+        if candidate.exists() and candidate.is_file():
+            try:
+                return json.loads(candidate.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+    return {}
+
+
+# ค้นหาไฟล์ภาพตัวอย่าง (Preview) ของโมเดลหรือ LoRA
+def find_preview_file(name: str, directory: str | Path) -> Path | None:
+    dir_path = Path(directory)
+    if not dir_path.exists():
+        return None
+    stem = Path(name).stem
+    extensions = (".preview.jpeg", ".preview.jpg", ".preview.png", ".jpeg", ".jpg", ".png")
+    for ext in extensions:
+        candidate = dir_path / f"{stem}{ext}"
+        if candidate.exists() and candidate.is_file():
+            return candidate
+        candidate2 = dir_path / f"{name}{ext}"
+        if candidate2.exists() and candidate2.is_file():
+            return candidate2
+    return None
+
+
+# สแกนโมเดล Checkpoint ทั้งหมดที่มีในเครื่อง
+def scan_installed_models(config: dict[str, Any]) -> list[dict[str, Any]]:
+    models_dir = Path(config.get("MODELS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\StableDiffusion"))
+    items: list[dict[str, Any]] = []
+    if models_dir.exists():
+        files = sorted(models_dir.glob("*.safetensors")) + sorted(models_dir.glob("*.ckpt"))
+        for f in files:
+            info = read_cm_info(f)
+            has_preview = find_preview_file(f.stem, models_dir) is not None
+            items.append({
+                "name": f.stem,
+                "filename": f.name,
+                "title": info.get("ModelName") or f.stem,
+                "base_model": info.get("BaseModel", "SDXL 1.0"),
+                "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+                "tags": info.get("Tags", []),
+                "author": info.get("AuthorUsername", ""),
+                "has_preview": has_preview,
+                "preview_url": f"/v1/preview/model/{f.stem}" if has_preview else None,
+            })
+    return items
+
+
+# สแกน LoRA ทั้งหมดที่มีในเครื่องพร้อมคำสั่ง Tag ใช้งาน
+def scan_installed_loras(config: dict[str, Any]) -> list[dict[str, Any]]:
+    loras_dir = Path(config.get("LORAS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\Lora"))
+    items: list[dict[str, Any]] = []
+    if loras_dir.exists():
+        files = sorted(loras_dir.glob("*.safetensors")) + sorted(loras_dir.glob("*.ckpt"))
+        for f in files:
+            info = read_cm_info(f)
+            has_preview = find_preview_file(f.stem, loras_dir) is not None
+            items.append({
+                "name": f.stem,
+                "filename": f.name,
+                "title": info.get("ModelName") or f.stem,
+                "base_model": info.get("BaseModel", "SDXL 1.0"),
+                "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+                "trained_words": info.get("TrainedWords", []),
+                "tags": info.get("Tags", []),
+                "author": info.get("AuthorUsername", ""),
+                "tag": f"<lora:{f.stem}:1.0>",
+                "has_preview": has_preview,
+                "preview_url": f"/v1/preview/lora/{f.stem}" if has_preview else None,
+            })
+    return items
+
+
+# ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler, checkpoint และ LoRA ที่เลือกได้
+def forge_payload(
+    config: dict[str, Any],
+    prompt: str,
+    seed: int,
+    steps: int,
+    model: str | None = None,
+    loras: list[Any] | None = None,
+    sampler: str | None = None,
+    cfg_scale: float | None = None,
+) -> dict[str, Any]:
+    final_prompt = prompt
+    if loras:
+        for item in loras:
+            if isinstance(item, str) and item.strip():
+                tag = f"<lora:{item.strip()}:1.0>"
+                if tag not in final_prompt:
+                    final_prompt = f"{final_prompt} {tag}"
+            elif isinstance(item, dict):
+                name = str(item.get("name", "")).strip()
+                weight = float(item.get("weight", 1.0))
+                if name:
+                    tag = f"<lora:{name}:{weight}>"
+                    if tag not in final_prompt:
+                        final_prompt = f"{final_prompt} {tag}"
+
+    cfg = float(cfg_scale) if cfg_scale is not None else float(config["FORGE_CFG_SCALE"])
+    sampler_name = sampler or config["FORGE_SAMPLER"]
+
     payload: dict[str, Any] = {
-        "prompt": prompt,
+        "prompt": final_prompt,
         "seed": seed,
         "steps": steps,
-        "cfg_scale": float(config["FORGE_CFG_SCALE"]),
-        "sampler_name": config["FORGE_SAMPLER"],
+        "cfg_scale": cfg,
+        "sampler_name": sampler_name,
         "batch_size": 1,
         "n_iter": 1,
         "send_images": True,
@@ -188,9 +326,10 @@ def forge_payload(config: dict[str, Any], prompt: str, seed: int, steps: int) ->
     }
     if config.get("FORGE_SCHEDULER"):
         payload["scheduler"] = config["FORGE_SCHEDULER"]
-    # เปลี่ยน checkpoint สำหรับคำขอนี้และให้ Forge คืนค่าเดิมภายหลัง
-    if config.get("FORGE_CHECKPOINT"):
-        payload["override_settings"] = {"sd_model_checkpoint": config["FORGE_CHECKPOINT"]}
+
+    active_checkpoint = model or config.get("FORGE_CHECKPOINT")
+    if active_checkpoint:
+        payload["override_settings"] = {"sd_model_checkpoint": active_checkpoint}
         payload["override_settings_restore_afterwards"] = True
     return payload
 
@@ -225,8 +364,12 @@ def generate_forge_image(
     height: int,
     seed: int,
     steps: int,
+    model: str | None = None,
+    loras: list[Any] | None = None,
+    sampler: str | None = None,
+    cfg_scale: float | None = None,
 ) -> tuple[Image.Image, int]:
-    payload = forge_payload(config, prompt, seed, steps)
+    payload = forge_payload(config, prompt, seed, steps, model=model, loras=loras, sampler=sampler, cfg_scale=cfg_scale)
     payload.update({"negative_prompt": negative_prompt, "width": width, "height": height})
     response = forge_request(config, "POST", "/sdapi/v1/txt2img", json=payload)
     return decode_forge_image(response, seed)
@@ -234,14 +377,31 @@ def generate_forge_image(
 
 # ปรับแนวและขนาดภาพ เข้ารหัสต้นทาง แล้วเรียก img2img ด้วย denoising_strength
 def edit_forge_image(
-    config: dict[str, Any], source: Image.Image, prompt: str, strength: float, seed: int
+    config: dict[str, Any],
+    source: Image.Image,
+    prompt: str,
+    strength: float,
+    seed: int,
+    model: str | None = None,
+    loras: list[Any] | None = None,
+    sampler: str | None = None,
+    cfg_scale: float | None = None,
 ) -> tuple[Image.Image, int]:
     image = ImageOps.exif_transpose(source).convert("RGB")
     # ย่อภาพให้อยู่ในขอบเขตขนาดที่กำหนดโดยคงอัตราส่วน
     image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
     source_buffer = io.BytesIO()
     image.save(source_buffer, format="PNG")
-    payload = forge_payload(config, prompt, seed, int(config["FORGE_EDIT_STEPS"]))
+    payload = forge_payload(
+        config,
+        prompt,
+        seed,
+        int(config["FORGE_EDIT_STEPS"]),
+        model=model,
+        loras=loras,
+        sampler=sampler,
+        cfg_scale=cfg_scale,
+    )
     payload.update(
         {
             "negative_prompt": "",
@@ -254,6 +414,7 @@ def edit_forge_image(
     )
     response = forge_request(config, "POST", "/sdapi/v1/img2img", json=payload)
     return decode_forge_image(response, seed)
+
 
 
 # สร้างชุดสีจากตัวสุ่มที่กำหนด seed สำหรับภาพทดสอบ
@@ -271,7 +432,16 @@ def _palette(rng: random.Random) -> list[tuple[int, int, int]]:
 
 
 # วาดภาพตัวอย่างด้วย Pillow จาก seed และ prompt โดยไม่ใช้โมเดลที่ผ่านการฝึก
-def generate_development_image(prompt: str, width: int, height: int, seed: int) -> Image.Image:
+def generate_development_image(
+    prompt: str,
+    width: int,
+    height: int,
+    seed: int,
+    model: str | None = None,
+    loras: list[Any] | None = None,
+    sampler: str | None = None,
+    cfg_scale: float | None = None,
+) -> Image.Image:
     rng = random.Random(seed)
     palette = _palette(rng)
     image = Image.new("RGB", (width, height), palette[0])
@@ -318,12 +488,25 @@ def generate_development_image(prompt: str, width: int, height: int, seed: int) 
     font = ImageFont.load_default(size=max(12, min(22, width // 28)))
     wrapped = "\n".join(textwrap.wrap(prompt, width=max(24, width // 15))[:3])
     overlay_draw.multiline_text((margin * 1.6, height - box_height), wrapped, font=font, fill=(245, 245, 250, 235), spacing=6)
-    overlay_draw.text((margin * 1.6, height - margin * 1.7), f"LUMA DEV PROVIDER  /  SEED {seed}", font=ImageFont.load_default(), fill=(190, 180, 230, 210))
+    badge = f"LUMA DEV  /  SEED {seed}"
+    if model:
+        badge += f"  /  {model}"
+    overlay_draw.text((margin * 1.6, height - margin * 1.7), badge, font=ImageFont.load_default(), fill=(190, 180, 230, 210))
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 
 # เลือกเอฟเฟกต์พื้นฐานตามคำใน prompt แล้วผสมภาพตาม strength สำหรับทดสอบ
-def edit_development_image(source: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:
+def edit_development_image(
+    source: Image.Image,
+    prompt: str,
+    strength: float,
+    seed: int,
+    model: str | None = None,
+    loras: list[Any] | None = None,
+    sampler: str | None = None,
+    cfg_scale: float | None = None,
+) -> Image.Image:
+
     image = ImageOps.exif_transpose(source).convert("RGB")
     image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
     rng = random.Random(seed)
@@ -380,9 +563,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         "FORGE_EDIT_STEPS": int(os.getenv("FORGE_EDIT_STEPS", "20")),
         "FORGE_CONNECT_TIMEOUT": float(os.getenv("FORGE_CONNECT_TIMEOUT", "5")),
         "FORGE_READ_TIMEOUT": float(os.getenv("FORGE_READ_TIMEOUT", "300")),
+        "MODELS_DIR": os.getenv("MODELS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\StableDiffusion"),
+        "LORAS_DIR": os.getenv("LORAS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\Lora"),
     }
     if test_config:
         config.update(test_config)
+
 
     # ตั้งรูปแบบบันทึกเพื่อใช้วิเคราะห์การทำงานของบริการ
 
@@ -453,6 +639,45 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 )
         return {"status": "ok", "service": "luma-ai", "provider": config["PROVIDER_NAME"]}
 
+    # ดึงรายชื่อโมเดล Checkpoints ที่มีในเครื่อง
+    @app.get("/v1/models", tags=["models"], dependencies=[private_api])
+    def models():
+        items = scan_installed_models(config)
+        return {
+            "models": items,
+            "count": len(items),
+            "active_model": config.get("FORGE_CHECKPOINT") or (items[0]["name"] if items else None),
+            "source": "local_disk" if not is_forge_provider(config) else "forge_and_disk",
+        }
+
+    # ดึงรายชื่อ LoRA พร้อมแท็กสำหรับใช้ใน Prompt
+    @app.get("/v1/loras", tags=["loras"], dependencies=[private_api])
+    def loras():
+        items = scan_installed_loras(config)
+        return {
+            "loras": items,
+            "count": len(items),
+            "source": "local_disk" if not is_forge_provider(config) else "forge_and_disk",
+        }
+
+    # เสิร์ฟภาพพรีวิวตัวอย่างของโมเดล Checkpoint
+    @app.get("/v1/preview/model/{name}", tags=["models"])
+    def model_preview(name: str):
+        path = find_preview_file(name, config.get("MODELS_DIR", ""))
+        if not path or not path.exists():
+            return error_response("not_found", f"Preview image for model '{name}' not found.", 404)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+    # เสิร์ฟภาพพรีวิวตัวอย่างของ LoRA
+    @app.get("/v1/preview/lora/{name}", tags=["loras"])
+    def lora_preview(name: str):
+        path = find_preview_file(name, config.get("LORAS_DIR", ""))
+        if not path or not path.exists():
+            return error_response("not_found", f"Preview image for LoRA '{name}' not found.", 404)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
     # ตรวจข้อมูลสร้างภาพแล้วส่งต่อการประมวลผลตามหน้าที่ของบริการนี้
     @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
     def generate(payload: GenerateRequest):
@@ -467,9 +692,22 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     payload.height,
                     seed,
                     payload.steps,
+                    model=payload.model,
+                    loras=payload.loras,
+                    sampler=payload.sampler,
+                    cfg_scale=payload.cfg_scale,
                 )
             else:
-                image = generate_development_image(payload.prompt, payload.width, payload.height, seed)
+                image = generate_development_image(
+                    payload.prompt,
+                    payload.width,
+                    payload.height,
+                    seed,
+                    model=payload.model,
+                    loras=payload.loras,
+                    sampler=payload.sampler,
+                    cfg_scale=payload.cfg_scale,
+                )
         except ProviderUnavailable as exc:
             raise ApiError("provider_unavailable", str(exc), 503) from exc
         except ProviderError as exc:
@@ -477,15 +715,20 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
+            "X-LUMA-Seed": str(seed),
+            "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+        }
+        if payload.model:
+            response_headers["X-LUMA-Model"] = str(payload.model)
+        if payload.loras:
+            response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
         # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
         return Response(
             content=buffer.getvalue(),
             media_type="image/png",
-            headers={
-                "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
-                "X-LUMA-Seed": str(seed),
-                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
-            },
+            headers=response_headers,
         )
 
     # ตรวจภาพที่อัปโหลดและพารามิเตอร์แก้ไขก่อนส่งต่อการประมวลผล
@@ -495,6 +738,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         prompt: Annotated[str, Form()],
         strength_value: Annotated[str, Form(alias="strength")] = "0.65",
         seed_value: Annotated[str | None, Form(alias="seed")] = None,
+        model: Annotated[str | None, Form()] = None,
+        loras: Annotated[str | None, Form()] = None,
+        sampler: Annotated[str | None, Form()] = None,
+        cfg_scale_value: Annotated[str | None, Form(alias="cfg_scale")] = None,
     ):
         if not image.filename:
             raise ApiError("validation_error", "An image file is required.", 400)
@@ -504,6 +751,13 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             if not 0 <= strength <= 1:
                 raise ValueError("Strength must be between 0 and 1.")
             seed = prompt_seed(parsed_prompt, seed_value)
+            cfg_scale = float(cfg_scale_value) if cfg_scale_value not in (None, "") else None
+            parsed_loras = None
+            if loras:
+                try:
+                    parsed_loras = json.loads(loras)
+                except Exception:
+                    parsed_loras = [name.strip() for name in loras.split(",") if name.strip()]
             image.file.seek(0, io.SEEK_END)
             if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
                 raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
@@ -521,24 +775,49 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
 
         try:
             if is_forge_provider(config):
-                result, seed = edit_forge_image(config, source, parsed_prompt, strength, seed)
+                result, seed = edit_forge_image(
+                    config,
+                    source,
+                    parsed_prompt,
+                    strength,
+                    seed,
+                    model=model,
+                    loras=parsed_loras,
+                    sampler=sampler,
+                    cfg_scale=cfg_scale,
+                )
             else:
-                result = edit_development_image(source, parsed_prompt, strength, seed)
+                result = edit_development_image(
+                    source,
+                    parsed_prompt,
+                    strength,
+                    seed,
+                    model=model,
+                    loras=parsed_loras,
+                    sampler=sampler,
+                    cfg_scale=cfg_scale,
+                )
         except ProviderUnavailable as exc:
             raise ApiError("provider_unavailable", str(exc), 503) from exc
         except ProviderError as exc:
             raise ApiError("provider_error", str(exc), 502) from exc
         buffer = io.BytesIO()
         result.save(buffer, format="PNG", optimize=True)
+        response_headers = {
+            "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
+            "X-LUMA-Seed": str(seed),
+            "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+        }
+        if model:
+            response_headers["X-LUMA-Model"] = str(model)
+        if parsed_loras:
+            response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
         return Response(
             content=buffer.getvalue(),
             media_type="image/png",
-            headers={
-                "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
-                "X-LUMA-Seed": str(seed),
-                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
-            },
+            headers=response_headers,
         )
+
 
     return app
 
