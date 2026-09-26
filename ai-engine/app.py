@@ -101,7 +101,9 @@ class GenerateRequest(BaseModel):
     model: str | None = None
     loras: list | None = None
     sampler: str | None = None
+    scheduler: str | None = None
     cfg_scale: float | None = None
+    clip_skip: int | None = None
 
 
     # ตรวจ prompt ผ่านกฎกลางก่อนสร้างโมเดลคำขอ
@@ -156,6 +158,13 @@ class GenerateRequest(BaseModel):
             return None
         return str(value).strip()
 
+    @field_validator("scheduler", mode="before")
+    @classmethod
+    def validate_scheduler(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        return str(value).strip()
+
     @field_validator("cfg_scale", mode="before")
     @classmethod
     def validate_cfg_scale(cls, value: Any) -> float | None:
@@ -167,6 +176,19 @@ class GenerateRequest(BaseModel):
             raise ValueError("cfg_scale must be a number.") from exc
         if not 1.0 <= val <= 30.0:
             raise ValueError("cfg_scale must be between 1.0 and 30.0.")
+        return val
+
+    @field_validator("clip_skip", mode="before")
+    @classmethod
+    def validate_clip_skip(cls, value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            val = int(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("clip_skip must be an integer.") from exc
+        if not 1 <= val <= 12:
+            raise ValueError("clip_skip must be between 1 and 12.")
         return val
 
 
@@ -284,7 +306,216 @@ def scan_installed_loras(config: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-# ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler, checkpoint และ LoRA ที่เลือกได้
+# รายการ Sampler มาตรฐานพร้อมคำอธิบายและจำนวน steps แนะนำ
+DEFAULT_SAMPLERS: list[dict[str, Any]] = [
+    {
+        "name": "Euler a",
+        "label": "Euler Ancestral (Euler a)",
+        "category": "Ancestral",
+        "description": "Fast and creative with soft blending. Excellent for anime illustrations.",
+        "recommended_steps": [20, 30],
+    },
+    {
+        "name": "Euler",
+        "label": "Euler",
+        "category": "Standard",
+        "description": "Deterministic, smooth, and fast. Great baseline for all models.",
+        "recommended_steps": [18, 25],
+    },
+    {
+        "name": "DPM++ 2M Karras",
+        "label": "DPM++ 2M Karras",
+        "category": "DPM-Solver",
+        "description": "High detail, crisp lines, and clean geometry. Industry standard for SDXL / Illustrious.",
+        "recommended_steps": [20, 35],
+    },
+    {
+        "name": "DPM++ 2M SDE Karras",
+        "label": "DPM++ 2M SDE Karras",
+        "category": "DPM-Solver (SDE)",
+        "description": "Adds subtle stochastic variation for richer texture, hair, and lighting.",
+        "recommended_steps": [24, 35],
+    },
+    {
+        "name": "DPM++ SDE Karras",
+        "label": "DPM++ SDE Karras",
+        "category": "DPM-Solver (SDE)",
+        "description": "Ultra fine details, micro textures, and depth at slightly higher step counts.",
+        "recommended_steps": [25, 40],
+    },
+    {
+        "name": "DPM++ 2S a Karras",
+        "label": "DPM++ 2S a Karras",
+        "category": "Ancestral",
+        "description": "Second-order ancestral solver for dynamic, painterly output.",
+        "recommended_steps": [20, 35],
+    },
+    {
+        "name": "DDIM",
+        "label": "DDIM",
+        "category": "Deterministic",
+        "description": "Classic deterministic sampler with predictable latent trajectory.",
+        "recommended_steps": [20, 40],
+    },
+    {
+        "name": "UniPC",
+        "label": "UniPC",
+        "category": "Fast Predictor-Corrector",
+        "description": "Fast convergence sampler capable of decent quality at lower step counts.",
+        "recommended_steps": [15, 25],
+    },
+    {
+        "name": "LCM",
+        "label": "LCM (Latent Consistency Model)",
+        "category": "Ultra Fast",
+        "description": "Ultra-fast generation for rapid prototyping at 4 to 10 steps.",
+        "recommended_steps": [4, 10],
+    },
+]
+
+# รายการ Scheduler สำหรับควบคุม Noise Schedule
+DEFAULT_SCHEDULERS: list[dict[str, Any]] = [
+    {
+        "name": "Automatic",
+        "label": "Automatic (WebUI Default)",
+        "description": "Automatically selects the optimal schedule for the chosen sampler.",
+    },
+    {
+        "name": "Karras",
+        "label": "Karras",
+        "description": "Noise schedule optimized by Karras et al. Recommended for DPM++ samplers.",
+    },
+    {
+        "name": "Exponential",
+        "label": "Exponential",
+        "description": "Exponential noise curve, good for high-contrast illustrations.",
+    },
+    {
+        "name": "SGM Uniform",
+        "label": "SGM Uniform",
+        "description": "Uniform schedule common in SDXL base pipelines.",
+    },
+    {
+        "name": "Simple",
+        "label": "Simple",
+        "description": "Linear variance schedule with balanced details.",
+    },
+    {
+        "name": "Normal",
+        "label": "Normal",
+        "description": "Standard schedule from original Stable Diffusion.",
+    },
+    {
+        "name": "DDIM Uniform",
+        "label": "DDIM Uniform",
+        "description": "Uniform schedule specifically designed for DDIM sampling.",
+    },
+    {
+        "name": "Beta",
+        "label": "Beta",
+        "description": "Beta distribution schedule for smooth gradients.",
+    },
+]
+
+# ชุด Presets สำเร็จรูปสำหรับสไตล์และคุณภาพภาพที่นิยม
+QUALITY_PRESETS: list[dict[str, Any]] = [
+    {
+        "id": "anime_masterpiece",
+        "name": "Anime Masterpiece",
+        "description": "Optimized for anime character portraits, smooth cell shading, and clean linework (Illustrious / Animagine).",
+        "sampler": "DPM++ 2M Karras",
+        "scheduler": "Karras",
+        "steps": 28,
+        "cfg_scale": 7.0,
+        "clip_skip": 2,
+    },
+    {
+        "id": "creative_vibrant",
+        "name": "Creative & Dynamic",
+        "description": "Encourages diverse poses, vibrant color saturation, and expressive backgrounds.",
+        "sampler": "Euler a",
+        "scheduler": "Simple",
+        "steps": 25,
+        "cfg_scale": 7.5,
+        "clip_skip": 2,
+    },
+    {
+        "id": "sharp_details",
+        "name": "Crisp & High-Detail",
+        "description": "Maximum texture clarity, intricate costume details, and fine environmental lighting.",
+        "sampler": "DPM++ 2M SDE Karras",
+        "scheduler": "Karras",
+        "steps": 32,
+        "cfg_scale": 6.5,
+        "clip_skip": 2,
+    },
+    {
+        "id": "fast_draft",
+        "name": "Fast Preview Draft",
+        "description": "Rapid generation for testing prompts, poses, or LoRA combinations in minimal time.",
+        "sampler": "Euler",
+        "scheduler": "Normal",
+        "steps": 16,
+        "cfg_scale": 6.0,
+        "clip_skip": 2,
+    },
+]
+
+# อัตราส่วนและขนาดภาพมาตรฐานสำหรับ SDXL และ SD 1.5
+ASPECT_RATIOS: list[dict[str, Any]] = [
+    {"label": "1:1 Square (1024x1024)", "width": 1024, "height": 1024, "aspect_ratio": "1:1", "recommended_for": "Avatars & Icons"},
+    {"label": "2:3 Portrait (832x1216)", "width": 832, "height": 1216, "aspect_ratio": "2:3", "recommended_for": "Full Body & Anime Character Art"},
+    {"label": "3:2 Landscape (1216x832)", "width": 1216, "height": 832, "aspect_ratio": "3:2", "recommended_for": "Scenery & Wallpapers"},
+    {"label": "3:4 Portrait (768x1024)", "width": 768, "height": 1024, "aspect_ratio": "3:4", "recommended_for": "Waist-up Character Portrait"},
+    {"label": "4:3 Landscape (1024x768)", "width": 1024, "height": 768, "aspect_ratio": "4:3", "recommended_for": "Standard Horizontal Art"},
+    {"label": "1:1 Medium Square (768x768)", "width": 768, "height": 768, "aspect_ratio": "1:1", "recommended_for": "Fast Square Generation"},
+    {"label": "1:1 Classic Square (512x512)", "width": 512, "height": 512, "aspect_ratio": "1:1", "recommended_for": "SD 1.5 Legacy"},
+]
+
+
+# ดึงรายชื่อ Sampler จาก Forge ถ้าเปิดอยู่ หรือส่งคืนรายการมาตรฐานที่เตรียมไว้
+def get_supported_samplers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    if is_forge_provider(config):
+        try:
+            resp = forge_request(config, "GET", "/sdapi/v1/samplers")
+            data = resp.json()
+            if isinstance(data, list) and data:
+                return [
+                    {
+                        "name": item.get("name", ""),
+                        "label": item.get("name", ""),
+                        "aliases": item.get("aliases", []),
+                        "options": item.get("options", {}),
+                    }
+                    for item in data
+                    if item.get("name")
+                ]
+        except Exception:
+            pass
+    return DEFAULT_SAMPLERS
+
+
+# ดึงรายชื่อ Scheduler จาก Forge ถ้าเปิดอยู่ หรือส่งคืนรายการมาตรฐานที่เตรียมไว้
+def get_supported_schedulers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    if is_forge_provider(config):
+        try:
+            resp = forge_request(config, "GET", "/sdapi/v1/schedulers")
+            data = resp.json()
+            if isinstance(data, list) and data:
+                return [
+                    {
+                        "name": item.get("name") or item.get("label", ""),
+                        "label": item.get("label") or item.get("name", ""),
+                    }
+                    for item in data
+                    if item.get("name") or item.get("label")
+                ]
+        except Exception:
+            pass
+    return DEFAULT_SCHEDULERS
+
+
+# ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler, scheduler, checkpoint, LoRA และ clip_skip
 def forge_payload(
     config: dict[str, Any],
     prompt: str,
@@ -293,7 +524,9 @@ def forge_payload(
     model: str | None = None,
     loras: list[Any] | None = None,
     sampler: str | None = None,
+    scheduler: str | None = None,
     cfg_scale: float | None = None,
+    clip_skip: int | None = None,
 ) -> dict[str, Any]:
     final_prompt = prompt
     if loras:
@@ -324,12 +557,19 @@ def forge_payload(
         "send_images": True,
         "save_images": False,
     }
-    if config.get("FORGE_SCHEDULER"):
-        payload["scheduler"] = config["FORGE_SCHEDULER"]
+    active_scheduler = scheduler or config.get("FORGE_SCHEDULER")
+    if active_scheduler and active_scheduler.strip() and active_scheduler.lower() != "automatic":
+        payload["scheduler"] = active_scheduler
 
+    override_settings: dict[str, Any] = {}
     active_checkpoint = model or config.get("FORGE_CHECKPOINT")
     if active_checkpoint:
-        payload["override_settings"] = {"sd_model_checkpoint": active_checkpoint}
+        override_settings["sd_model_checkpoint"] = active_checkpoint
+    if clip_skip is not None:
+        override_settings["CLIP_stop_at_last_layers"] = int(clip_skip)
+
+    if override_settings:
+        payload["override_settings"] = override_settings
         payload["override_settings_restore_afterwards"] = True
     return payload
 
@@ -367,9 +607,22 @@ def generate_forge_image(
     model: str | None = None,
     loras: list[Any] | None = None,
     sampler: str | None = None,
+    scheduler: str | None = None,
     cfg_scale: float | None = None,
+    clip_skip: int | None = None,
 ) -> tuple[Image.Image, int]:
-    payload = forge_payload(config, prompt, seed, steps, model=model, loras=loras, sampler=sampler, cfg_scale=cfg_scale)
+    payload = forge_payload(
+        config,
+        prompt,
+        seed,
+        steps,
+        model=model,
+        loras=loras,
+        sampler=sampler,
+        scheduler=scheduler,
+        cfg_scale=cfg_scale,
+        clip_skip=clip_skip,
+    )
     payload.update({"negative_prompt": negative_prompt, "width": width, "height": height})
     response = forge_request(config, "POST", "/sdapi/v1/txt2img", json=payload)
     return decode_forge_image(response, seed)
@@ -385,7 +638,9 @@ def edit_forge_image(
     model: str | None = None,
     loras: list[Any] | None = None,
     sampler: str | None = None,
+    scheduler: str | None = None,
     cfg_scale: float | None = None,
+    clip_skip: int | None = None,
 ) -> tuple[Image.Image, int]:
     image = ImageOps.exif_transpose(source).convert("RGB")
     # ย่อภาพให้อยู่ในขอบเขตขนาดที่กำหนดโดยคงอัตราส่วน
@@ -400,7 +655,9 @@ def edit_forge_image(
         model=model,
         loras=loras,
         sampler=sampler,
+        scheduler=scheduler,
         cfg_scale=cfg_scale,
+        clip_skip=clip_skip,
     )
     payload.update(
         {
@@ -440,7 +697,9 @@ def generate_development_image(
     model: str | None = None,
     loras: list[Any] | None = None,
     sampler: str | None = None,
+    scheduler: str | None = None,
     cfg_scale: float | None = None,
+    clip_skip: int | None = None,
 ) -> Image.Image:
     rng = random.Random(seed)
     palette = _palette(rng)
@@ -504,7 +763,9 @@ def edit_development_image(
     model: str | None = None,
     loras: list[Any] | None = None,
     sampler: str | None = None,
+    scheduler: str | None = None,
     cfg_scale: float | None = None,
+    clip_skip: int | None = None,
 ) -> Image.Image:
 
     image = ImageOps.exif_transpose(source).convert("RGB")
@@ -565,6 +826,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         "FORGE_READ_TIMEOUT": float(os.getenv("FORGE_READ_TIMEOUT", "300")),
         "MODELS_DIR": os.getenv("MODELS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\StableDiffusion"),
         "LORAS_DIR": os.getenv("LORAS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\Lora"),
+        "CLIP_SKIP": int(os.getenv("CLIP_SKIP", "2")),
     }
     if test_config:
         config.update(test_config)
@@ -678,6 +940,54 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
         return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
 
+    # ดึงรายชื่อ Sampler ทั้งหมดที่รองรับ พร้อมหมวดหมู่และจำนวน steps แนะนำ
+    @app.get("/v1/samplers", tags=["settings"], dependencies=[private_api])
+    def samplers():
+        items = get_supported_samplers(config)
+        return {
+            "samplers": items,
+            "count": len(items),
+            "default": config.get("FORGE_SAMPLER") or "Euler",
+        }
+
+    # ดึงรายชื่อ Scheduler สำหรับควบคุม Noise Schedule
+    @app.get("/v1/schedulers", tags=["settings"], dependencies=[private_api])
+    def schedulers():
+        items = get_supported_schedulers(config)
+        return {
+            "schedulers": items,
+            "count": len(items),
+            "default": config.get("FORGE_SCHEDULER") or "Automatic",
+        }
+
+    # ดึงการตั้งค่าทั้งหมด: ค่ามาตรฐาน, ขอบเขตที่อนุญาต, อัตราส่วนภาพ และ Presets คุณภาพ
+    @app.get("/v1/settings", tags=["settings"], dependencies=[private_api])
+    def settings():
+        active_checkpoint = config.get("FORGE_CHECKPOINT") or ""
+        installed_models = scan_installed_models(config)
+        return {
+            "defaults": {
+                "sampler": config.get("FORGE_SAMPLER") or "Euler",
+                "scheduler": config.get("FORGE_SCHEDULER") or "Automatic",
+                "cfg_scale": float(config.get("FORGE_CFG_SCALE", 7.0)),
+                "steps": int(config.get("FORGE_EDIT_STEPS", 20)),
+                "clip_skip": int(config.get("CLIP_SKIP", 2)),
+                "width": 512,
+                "height": 512,
+                "active_model": active_checkpoint or (installed_models[0]["name"] if installed_models else None),
+            },
+            "ranges": {
+                "cfg_scale": {"min": 1.0, "max": 20.0, "step": 0.5, "default": float(config.get("FORGE_CFG_SCALE", 7.0))},
+                "steps": {"min": 1, "max": 50, "step": 1, "default": int(config.get("FORGE_EDIT_STEPS", 20))},
+                "clip_skip": {"min": 1, "max": 12, "step": 1, "default": int(config.get("CLIP_SKIP", 2))},
+                "dimensions": {"min": MIN_DIMENSION, "max": MAX_DIMENSION, "multiple_of": 64},
+            },
+            "aspect_ratios": ASPECT_RATIOS,
+            "presets": QUALITY_PRESETS,
+            "total_models": len(installed_models),
+            "total_loras": len(scan_installed_loras(config)),
+        }
+
     # ตรวจข้อมูลสร้างภาพแล้วส่งต่อการประมวลผลตามหน้าที่ของบริการนี้
     @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
     def generate(payload: GenerateRequest):
@@ -695,7 +1005,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     model=payload.model,
                     loras=payload.loras,
                     sampler=payload.sampler,
+                    scheduler=payload.scheduler,
                     cfg_scale=payload.cfg_scale,
+                    clip_skip=payload.clip_skip,
                 )
             else:
                 image = generate_development_image(
@@ -706,7 +1018,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     model=payload.model,
                     loras=payload.loras,
                     sampler=payload.sampler,
+                    scheduler=payload.scheduler,
                     cfg_scale=payload.cfg_scale,
+                    clip_skip=payload.clip_skip,
                 )
         except ProviderUnavailable as exc:
             raise ApiError("provider_unavailable", str(exc), 503) from exc
@@ -715,15 +1029,24 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
+        active_sampler = payload.sampler or config.get("FORGE_SAMPLER") or "Euler"
+        active_cfg = payload.cfg_scale if payload.cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
         response_headers = {
             "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
             "X-LUMA-Seed": str(seed),
             "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+            "X-LUMA-Sampler": str(active_sampler),
+            "X-LUMA-CFG-Scale": str(active_cfg),
+            "X-LUMA-Steps": str(payload.steps),
         }
         if payload.model:
             response_headers["X-LUMA-Model"] = str(payload.model)
         if payload.loras:
             response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
+        if payload.scheduler:
+            response_headers["X-LUMA-Scheduler"] = str(payload.scheduler)
+        if payload.clip_skip is not None:
+            response_headers["X-LUMA-Clip-Skip"] = str(payload.clip_skip)
         # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
         return Response(
             content=buffer.getvalue(),
@@ -741,7 +1064,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         model: Annotated[str | None, Form()] = None,
         loras: Annotated[str | None, Form()] = None,
         sampler: Annotated[str | None, Form()] = None,
+        scheduler: Annotated[str | None, Form()] = None,
         cfg_scale_value: Annotated[str | None, Form(alias="cfg_scale")] = None,
+        clip_skip_value: Annotated[str | None, Form(alias="clip_skip")] = None,
     ):
         if not image.filename:
             raise ApiError("validation_error", "An image file is required.", 400)
@@ -752,6 +1077,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 raise ValueError("Strength must be between 0 and 1.")
             seed = prompt_seed(parsed_prompt, seed_value)
             cfg_scale = float(cfg_scale_value) if cfg_scale_value not in (None, "") else None
+            clip_skip = int(clip_skip_value) if clip_skip_value not in (None, "") else None
             parsed_loras = None
             if loras:
                 try:
@@ -784,7 +1110,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     model=model,
                     loras=parsed_loras,
                     sampler=sampler,
+                    scheduler=scheduler,
                     cfg_scale=cfg_scale,
+                    clip_skip=clip_skip,
                 )
             else:
                 result = edit_development_image(
@@ -795,7 +1123,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     model=model,
                     loras=parsed_loras,
                     sampler=sampler,
+                    scheduler=scheduler,
                     cfg_scale=cfg_scale,
+                    clip_skip=clip_skip,
                 )
         except ProviderUnavailable as exc:
             raise ApiError("provider_unavailable", str(exc), 503) from exc
@@ -803,15 +1133,23 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             raise ApiError("provider_error", str(exc), 502) from exc
         buffer = io.BytesIO()
         result.save(buffer, format="PNG", optimize=True)
+        active_sampler = sampler or config.get("FORGE_SAMPLER") or "Euler"
+        active_cfg = cfg_scale if cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
         response_headers = {
             "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
             "X-LUMA-Seed": str(seed),
             "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+            "X-LUMA-Sampler": str(active_sampler),
+            "X-LUMA-CFG-Scale": str(active_cfg),
         }
         if model:
             response_headers["X-LUMA-Model"] = str(model)
         if parsed_loras:
             response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
+        if scheduler:
+            response_headers["X-LUMA-Scheduler"] = str(scheduler)
+        if clip_skip is not None:
+            response_headers["X-LUMA-Clip-Skip"] = str(clip_skip)
         return Response(
             content=buffer.getvalue(),
             media_type="image/png",
