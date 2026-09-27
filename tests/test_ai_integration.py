@@ -3,6 +3,9 @@
 import io
 import json
 
+import pytest
+
+from luma_backend import ai_catalog
 from luma_backend import worker
 
 
@@ -107,3 +110,86 @@ def test_invalid_ai_controls_are_rejected_before_queueing(backend_client, regist
         )
         assert response.status_code == 400
         assert response.get_json()["error"]["code"] == "validation_error"
+
+
+class AiJsonResponse:
+    ok = True
+    status_code = 200
+
+    def __init__(self, data):
+        self.data = data
+
+    def json(self):
+        return self.data
+
+
+class AiPreviewResponse:
+    ok = True
+    status_code = 200
+
+    def __init__(self, image):
+        self.content = image
+        self.headers = {"Content-Type": "image/png"}
+
+
+def test_catalog_and_signed_preview_stay_behind_backend(backend_client, registered_user, png_bytes, monkeypatch):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/v1/models"):
+            return AiJsonResponse({"models": [{"name": "model xl", "has_preview": True, "preview_url": "/v1/preview/model/model xl"}], "count": 1})
+        if url.endswith("/v1/preview/model/model%20xl"):
+            return AiPreviewResponse(png_bytes)
+        raise AssertionError(url)
+
+    monkeypatch.setattr(ai_catalog.requests, "get", fake_get)
+    assert backend_client.get("/api/v1/ai/models").status_code == 401
+    response = backend_client.get("/api/v1/ai/models", headers=auth(registered_user["token"]))
+    assert response.status_code == 200
+    preview_url = response.get_json()["models"][0]["preview_url"]
+    assert preview_url.startswith("/api/v1/ai/preview/model/model%20xl?token=")
+    assert backend_client.get("/api/v1/ai/preview/model/model%20xl").status_code == 401
+    assert backend_client.get(preview_url.replace("/model/", "/lora/")).status_code == 401
+    preview = backend_client.get(preview_url)
+    assert preview.status_code == 200
+    assert preview.data == png_bytes
+    assert calls[0][1]["headers"]["X-LUMA-Service-Token"] == "test-service-token"
+
+
+def test_catalog_hides_ai_error_details(backend_client, registered_user, monkeypatch):
+    class FailedResponse:
+        ok = False
+        status_code = 401
+        text = "secret upstream configuration"
+
+    monkeypatch.setattr(ai_catalog.requests, "get", lambda *args, **kwargs: FailedResponse())
+    response = backend_client.get("/api/v1/ai/settings", headers=auth(registered_user["token"]))
+    assert response.status_code == 502
+    assert "secret upstream configuration" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("backend_path", "engine_path"),
+    [
+        ("models", "models"),
+        ("loras", "loras"),
+        ("samplers", "samplers"),
+        ("schedulers", "schedulers"),
+        ("settings", "settings"),
+        ("styles", "styles"),
+        ("styles/anime_illustrious", "styles/anime_illustrious"),
+        ("queue/status", "queue/status"),
+    ],
+)
+def test_catalog_routes_match_engine(backend_client, registered_user, monkeypatch, backend_path, engine_path):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        return AiJsonResponse({"models": [], "loras": [], "count": 0})
+
+    monkeypatch.setattr(ai_catalog.requests, "get", fake_get)
+    response = backend_client.get(f"/api/v1/ai/{backend_path}", headers=auth(registered_user["token"]))
+    assert response.status_code == 200
+    assert calls == [f"http://ai.test/v1/{engine_path}"]

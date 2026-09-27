@@ -13,6 +13,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 
 from .auth import auth_blueprint
+from .ai_catalog import ai_blueprint
 from .config import Config, validate_runtime_config
 from .extensions import db
 from .jobs import jobs_blueprint, media_blueprint
@@ -56,6 +57,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     app.register_blueprint(auth_blueprint, url_prefix="/api/v1/auth")
     app.register_blueprint(jobs_blueprint, url_prefix="/api/v1/jobs")
+    app.register_blueprint(ai_blueprint, url_prefix="/api/v1/ai")
     app.register_blueprint(media_blueprint, url_prefix="/media")
 
     with app.app_context():

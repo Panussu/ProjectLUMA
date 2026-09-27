@@ -28,6 +28,33 @@ Copy-Item .env.vlan.example .env
 
 คิวงานใช้ thread pool ภายในโปรเซส ให้ใช้ Backend 1 โปรเซสในการสาธิต หากต้องเปิดหลายโปรเซสต้องออกแบบคิวร่วม เช่น Celery หรือ RQ พร้อมทดสอบเพิ่มเติม
 
+## การเชื่อมต่อ AiEngine
+
+กำหนด `AI_SERVICE_URL` ให้ชี้ FastAPI บน PC 1 และ `AI_SERVICE_TOKEN` ให้ตรงกันทั้งสองเครื่อง Backend ส่งโทเคนผ่าน `X-LUMA-Service-Token` โดยอัตโนมัติ งานสร้างภาพส่ง JSON ไป `/v1/generate` และงานแก้ไขภาพส่ง multipart ไป `/v1/edit` ภาพ PNG ที่ตอบกลับจะถูกตรวจและเก็บใน `MEDIA_ROOT`
+
+`AI_READ_TIMEOUT` เริ่มต้น 600 วินาที เพื่อครอบคลุมการรอคิวของ AiEngine (ค่าเริ่มต้น 180 วินาที) และการรอ Forge สร้างภาพ (ค่าเริ่มต้น 300 วินาที) ปรับค่านี้ให้สูงกว่าผลรวมของสองช่วงเมื่อเปลี่ยนการตั้งค่าคิวหรือ Forge ส่วน `AI_METADATA_TIMEOUT` เริ่มต้น 10 วินาที ใช้กับรายการตัวเลือกและภาพพรีวิว
+
+ส่งตัวเลือกเพิ่มเติมใน `POST /api/v1/jobs/generate` ได้ เช่น
+
+```json
+{
+  "prompt": "a paper city in daylight",
+  "model": "checkpoint-xl",
+  "loras": [{"name": "detail", "weight": 0.7}],
+  "sampler": "Euler a",
+  "scheduler": "Karras",
+  "cfg_scale": 7.5,
+  "clip_skip": 2,
+  "style_preset": "anime_illustrious"
+}
+```
+
+`POST /api/v1/jobs/edit` รับฟิลด์เดียวกันใน multipart form โดย `loras` ต้องเป็นข้อความ JSON array เช่น `[{"name":"detail","weight":0.7}]` Backend เก็บค่าที่ขอใน `job.ai_options` และค่าที่ AiEngine รายงานกลับใน `job.ai_result` งานเก่าจะมีสองช่องนี้เป็น `{}` ฐานข้อมูล SQLite เดิมใช้ต่อได้เพราะข้อมูลตัวเลือกอยู่ในตารางใหม่ `job_ai_options`
+
+ผู้ใช้ที่มี JWT เรียก `GET /api/v1/ai/models`, `/loras`, `/samplers`, `/schedulers`, `/settings`, `/styles`, `/styles/<style_id>` และ `/queue/status` เพื่อดูตัวเลือกจาก AiEngine ได้ รายการโมเดลและ LoRA ที่มีพรีวิวจะได้ `preview_url` ของ Backend ซึ่งเป็นลิงก์ลงลายเซ็นและหมดอายุตาม `MEDIA_TOKEN_MAX_AGE` จึงใช้เป็น `src` ของภาพในเบราว์เซอร์ได้โดยไม่เปิดโทเคนบริการให้ Frontend
+
+สถานะงานยังอ่านจาก `GET /api/v1/jobs/<job_id>` ค่า `progress` ของ Backend แสดงช่วง queued, processing และ completed เท่านั้น เนื่องจาก `/v1/progress` ของ AiEngine เป็นสถานะรวมของ GPU และไม่มี job ID จึงไม่สามารถผูกเปอร์เซ็นต์หรือภาพระหว่างทางกับงานของผู้ใช้แต่ละคนได้อย่างปลอดภัย
+
 ## ความสามารถเพิ่มเติมในสาขา Backend
 
 ดาวน์โหลดภาพได้ด้วยลิงก์ที่มีลายเซ็นและอายุจำกัด หรือส่วนหัว `Authorization: Bearer <token>` ของเจ้าของภาพ โทเคนของบัญชีอื่นไม่ได้ให้สิทธิ์อ่านภาพนั้น

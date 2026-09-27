@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -123,7 +124,7 @@ def process_job(app: Flask, job_id: str) -> None:
                 }
                 if job.ai_options:
                     payload.update(job.ai_options.request_options)
-                response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers, timeout=timeout)
+                response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers, timeout=timeout, allow_redirects=False)
             else:
                 source_to_remove = Path(app.config["UPLOAD_ROOT"]) / str(job.source_filename)
                 form = {"prompt": job.prompt, "strength": str(job.strength), "seed": str(job.seed)}
@@ -137,11 +138,12 @@ def process_job(app: Flask, job_id: str) -> None:
                         files={"image": (source_to_remove.name, source, "application/octet-stream")},
                         headers=headers,
                         timeout=timeout,
+                        allow_redirects=False,
                     )
 
             # แปลง HTTP error ของบริการปลายทางเป็นข้อผิดพลาดของงาน
 
-            if not response.ok:
+            if response.status_code != 200:
                 try:
                     detail = response.json().get("error", {}).get("message", response.text)
                 except ValueError:
@@ -182,15 +184,19 @@ def process_job(app: Flask, job_id: str) -> None:
                 ):
                     if response.headers.get(header):
                         result_options[field] = response.headers[header][:255]
-                for field, header in (("steps", "X-LUMA-Steps"), ("clip_skip", "X-LUMA-Clip-Skip")):
+                for field, header, minimum, maximum in (("steps", "X-LUMA-Steps", 1, 50), ("clip_skip", "X-LUMA-Clip-Skip", 1, 12)):
                     if response.headers.get(header):
                         try:
-                            result_options[field] = int(response.headers[header])
+                            value = int(response.headers[header])
+                            if minimum <= value <= maximum:
+                                result_options[field] = value
                         except ValueError:
                             logger.warning("Ignoring invalid %s header for job %s", header, job_id)
                 if response.headers.get("X-LUMA-CFG-Scale"):
                     try:
-                        result_options["cfg_scale"] = float(response.headers["X-LUMA-CFG-Scale"])
+                        value = float(response.headers["X-LUMA-CFG-Scale"])
+                        if math.isfinite(value) and 1 <= value <= 30:
+                            result_options["cfg_scale"] = value
                     except ValueError:
                         logger.warning("Ignoring invalid CFG scale header for job %s", job_id)
                 job.ai_options.result_options = result_options

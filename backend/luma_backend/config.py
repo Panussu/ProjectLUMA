@@ -84,7 +84,8 @@ class Config:
         self.AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8000")
         self.AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN", "change-me-in-production")
         self.AI_CONNECT_TIMEOUT = float(os.getenv("AI_CONNECT_TIMEOUT", "5"))
-        self.AI_READ_TIMEOUT = float(os.getenv("AI_READ_TIMEOUT", "180"))
+        self.AI_READ_TIMEOUT = float(os.getenv("AI_READ_TIMEOUT", "600"))
+        self.AI_METADATA_TIMEOUT = float(os.getenv("AI_METADATA_TIMEOUT", "10"))
         self.RECOVER_JOBS_ON_STARTUP = os.getenv("RECOVER_JOBS_ON_STARTUP", "1").strip().casefold() not in {
             "0",
             "false",
