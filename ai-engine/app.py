@@ -11,6 +11,9 @@ import logging
 import os
 import random
 import textwrap
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -52,6 +55,118 @@ class ApiError(RuntimeError):
         self.code = code
         self.message = message
         self.status_code = status_code
+
+
+# ระบบจัดการคิวและควบคุมการประมวลผลพร้อมกันสำหรับ GPU (Concurrency & Queue Manager)
+class GenerationQueueManager:
+    """Thread-safe concurrency limiter and request queue for AI image generation."""
+
+    def __init__(self, max_concurrency: int = 1, max_capacity: int = 20, default_timeout: float = 180.0):
+        self.max_concurrency = max(1, int(max_concurrency))
+        self.max_capacity = max(1, int(max_capacity))
+        self.default_timeout = max(1.0, float(default_timeout))
+        self._semaphore = threading.Semaphore(self.max_concurrency)
+        self._lock = threading.Lock()
+        self._active_jobs = 0
+        self._queued_jobs = 0
+        self._total_completed = 0
+        self._total_failed = 0
+        self._total_rejected = 0
+        self._total_wait_time_ms = 0.0
+        self._total_exec_time_ms = 0.0
+        self._start_time = time.time()
+
+    @property
+    def active_jobs(self) -> int:
+        with self._lock:
+            return self._active_jobs
+
+    @property
+    def queued_jobs(self) -> int:
+        with self._lock:
+            return self._queued_jobs
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            completed = self._total_completed
+            avg_exec = round(self._total_exec_time_ms / completed, 1) if completed > 0 else 0.0
+            avg_wait = round(self._total_wait_time_ms / completed, 1) if completed > 0 else 0.0
+            estimated_wait_sec = round(self._queued_jobs * (avg_exec / 1000.0), 1) if avg_exec > 0 else 0.0
+            return {
+                "status": "ok",
+                "gpu_available": self._active_jobs < self.max_concurrency,
+                "active_jobs": self._active_jobs,
+                "queued_jobs": self._queued_jobs,
+                "max_concurrency": self.max_concurrency,
+                "queue_capacity": self.max_capacity,
+                "total_completed": self._total_completed,
+                "total_failed": self._total_failed,
+                "total_rejected": self._total_rejected,
+                "average_execution_time_ms": avg_exec,
+                "average_wait_time_ms": avg_wait,
+                "estimated_wait_time_seconds": estimated_wait_sec,
+                "uptime_seconds": round(time.time() - self._start_time, 1),
+            }
+
+    @contextmanager
+    def acquire(self, timeout: float | None = None):
+        req_timeout = timeout if timeout is not None else self.default_timeout
+        wait_start = time.perf_counter()
+
+        with self._lock:
+            if self._queued_jobs >= self.max_capacity:
+                self._total_rejected += 1
+                raise ApiError(
+                    "queue_full",
+                    f"The AI generation queue is full ({self._queued_jobs} jobs queued). Please retry shortly.",
+                    429,
+                )
+            self._queued_jobs += 1
+
+        acquired = False
+        try:
+            acquired = self._semaphore.acquire(timeout=req_timeout)
+            if not acquired:
+                with self._lock:
+                    self._total_rejected += 1
+                raise ApiError(
+                    "queue_timeout",
+                    f"Request timed out waiting in the generation queue after {req_timeout}s.",
+                    504,
+                )
+            wait_duration_ms = (time.perf_counter() - wait_start) * 1000.0
+            with self._lock:
+                self._queued_jobs -= 1
+                self._active_jobs += 1
+                remaining_queued = self._queued_jobs
+
+            exec_start = time.perf_counter()
+            job_stats = {
+                "wait_ms": round(wait_duration_ms, 1),
+                "remaining_queued": remaining_queued,
+                "exec_start": exec_start,
+                "exec_ms": 0.0,
+            }
+            try:
+                yield job_stats
+                exec_duration_ms = (time.perf_counter() - exec_start) * 1000.0
+                job_stats["exec_ms"] = round(exec_duration_ms, 1)
+                with self._lock:
+                    self._total_completed += 1
+                    self._total_wait_time_ms += wait_duration_ms
+                    self._total_exec_time_ms += exec_duration_ms
+            except Exception:
+                with self._lock:
+                    self._total_failed += 1
+                raise
+            finally:
+                with self._lock:
+                    self._active_jobs -= 1
+                self._semaphore.release()
+        finally:
+            if not acquired:
+                with self._lock:
+                    self._queued_jobs = max(0, self._queued_jobs - 1)
 
 
 # จัดรูปข้อผิดพลาดให้มี code และ message พร้อมรหัสสถานะ HTTP
@@ -827,10 +942,19 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         "MODELS_DIR": os.getenv("MODELS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\StableDiffusion"),
         "LORAS_DIR": os.getenv("LORAS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\Lora"),
         "CLIP_SKIP": int(os.getenv("CLIP_SKIP", "2")),
+        "MAX_CONCURRENT_GENERATIONS": int(os.getenv("MAX_CONCURRENT_GENERATIONS", "1")),
+        "MAX_QUEUE_CAPACITY": int(os.getenv("MAX_QUEUE_CAPACITY", "20")),
+        "QUEUE_TIMEOUT_SECONDS": float(os.getenv("QUEUE_TIMEOUT_SECONDS", "180.0")),
     }
     if test_config:
         config.update(test_config)
 
+    # ตัวจัดการคิวและความพร้อมกันของ GPU ประจำแอป
+    queue_manager = GenerationQueueManager(
+        max_concurrency=int(config["MAX_CONCURRENT_GENERATIONS"]),
+        max_capacity=int(config["MAX_QUEUE_CAPACITY"]),
+        default_timeout=float(config["QUEUE_TIMEOUT_SECONDS"]),
+    )
 
     # ตั้งรูปแบบบันทึกเพื่อใช้วิเคราะห์การทำงานของบริการ
 
@@ -840,8 +964,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         description="Private authenticated wrapper for WebUI Forge image generation and editing.",
         version="1.0.0",
     )
-    # เก็บค่ากำหนดไว้กับแอปเพื่อให้ endpoint ใช้ร่วมกัน
+    # เก็บค่ากำหนดและตัวจัดการคิวไว้กับแอปเพื่อให้ endpoint ใช้ร่วมกัน
     app.state.config = config
+    app.state.queue = queue_manager
 
     # แปลง ApiError เป็นคำตอบ JSON ตามรหัสที่บริการกำหนด
     @app.exception_handler(ApiError)
@@ -896,10 +1021,16 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                         "service": "luma-ai",
                         "provider": "webui-forge",
                         "error": str(exc),
+                        "queue": queue_manager.status(),
                     },
                     status_code=503,
                 )
-        return {"status": "ok", "service": "luma-ai", "provider": config["PROVIDER_NAME"]}
+        return {
+            "status": "ok",
+            "service": "luma-ai",
+            "provider": config["PROVIDER_NAME"],
+            "queue": queue_manager.status(),
+        }
 
     # ดึงรายชื่อโมเดล Checkpoints ที่มีในเครื่อง
     @app.get("/v1/models", tags=["models"], dependencies=[private_api])
@@ -988,71 +1119,107 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             "total_loras": len(scan_installed_loras(config)),
         }
 
+    # ดึงสถานะคิวและการใช้งาน GPU แบบเรียลไทม์
+    @app.get("/v1/queue/status", tags=["queue"], dependencies=[private_api])
+    def queue_status():
+        return queue_manager.status()
+
+    # ขอยกเลิกงานสร้างภาพที่กำลังประมวลผลอยู่บน WebUI Forge ทันที
+    @app.post("/v1/interrupt", tags=["queue"], dependencies=[private_api])
+    def interrupt():
+        if is_forge_provider(config):
+            try:
+                forge_request(config, "POST", "/sdapi/v1/interrupt")
+                return {"status": "interrupted", "message": "Forge generation interrupt signal sent."}
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+        return {"status": "ok", "message": "Interrupt signal processed (development provider)."}
+
+    # ขอข้ามขั้นตอนการสร้างภาพปัจจุบันบน WebUI Forge
+    @app.post("/v1/skip", tags=["queue"], dependencies=[private_api])
+    def skip():
+        if is_forge_provider(config):
+            try:
+                forge_request(config, "POST", "/sdapi/v1/skip")
+                return {"status": "skipped", "message": "Forge generation skip signal sent."}
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+        return {"status": "ok", "message": "Skip signal processed (development provider)."}
+
     # ตรวจข้อมูลสร้างภาพแล้วส่งต่อการประมวลผลตามหน้าที่ของบริการนี้
     @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
     def generate(payload: GenerateRequest):
-        seed = prompt_seed(payload.prompt, payload.seed)
-        try:
-            if is_forge_provider(config):
-                image, seed = generate_forge_image(
-                    config,
-                    payload.prompt,
-                    payload.negative_prompt,
-                    payload.width,
-                    payload.height,
-                    seed,
-                    payload.steps,
-                    model=payload.model,
-                    loras=payload.loras,
-                    sampler=payload.sampler,
-                    scheduler=payload.scheduler,
-                    cfg_scale=payload.cfg_scale,
-                    clip_skip=payload.clip_skip,
-                )
-            else:
-                image = generate_development_image(
-                    payload.prompt,
-                    payload.width,
-                    payload.height,
-                    seed,
-                    model=payload.model,
-                    loras=payload.loras,
-                    sampler=payload.sampler,
-                    scheduler=payload.scheduler,
-                    cfg_scale=payload.cfg_scale,
-                    clip_skip=payload.clip_skip,
-                )
-        except ProviderUnavailable as exc:
-            raise ApiError("provider_unavailable", str(exc), 503) from exc
-        except ProviderError as exc:
-            raise ApiError("provider_error", str(exc), 502) from exc
-        # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
-        active_sampler = payload.sampler or config.get("FORGE_SAMPLER") or "Euler"
-        active_cfg = payload.cfg_scale if payload.cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
-        response_headers = {
-            "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
-            "X-LUMA-Seed": str(seed),
-            "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
-            "X-LUMA-Sampler": str(active_sampler),
-            "X-LUMA-CFG-Scale": str(active_cfg),
-            "X-LUMA-Steps": str(payload.steps),
-        }
-        if payload.model:
-            response_headers["X-LUMA-Model"] = str(payload.model)
-        if payload.loras:
-            response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
-        if payload.scheduler:
-            response_headers["X-LUMA-Scheduler"] = str(payload.scheduler)
-        if payload.clip_skip is not None:
-            response_headers["X-LUMA-Clip-Skip"] = str(payload.clip_skip)
-        # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
-        return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
-            headers=response_headers,
-        )
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            seed = prompt_seed(payload.prompt, payload.seed)
+            try:
+                if is_forge_provider(config):
+                    image, seed = generate_forge_image(
+                        config,
+                        payload.prompt,
+                        payload.negative_prompt,
+                        payload.width,
+                        payload.height,
+                        seed,
+                        payload.steps,
+                        model=payload.model,
+                        loras=payload.loras,
+                        sampler=payload.sampler,
+                        scheduler=payload.scheduler,
+                        cfg_scale=payload.cfg_scale,
+                        clip_skip=payload.clip_skip,
+                    )
+                else:
+                    image = generate_development_image(
+                        payload.prompt,
+                        payload.width,
+                        payload.height,
+                        seed,
+                        model=payload.model,
+                        loras=payload.loras,
+                        sampler=payload.sampler,
+                        scheduler=payload.scheduler,
+                        cfg_scale=payload.cfg_scale,
+                        clip_skip=payload.clip_skip,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+            # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            active_sampler = payload.sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = payload.cfg_scale if payload.cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
+                "X-LUMA-Seed": str(seed),
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Sampler": str(active_sampler),
+                "X-LUMA-CFG-Scale": str(active_cfg),
+                "X-LUMA-Steps": str(payload.steps),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            if payload.model:
+                response_headers["X-LUMA-Model"] = str(payload.model)
+            if payload.loras:
+                response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
+            if payload.scheduler:
+                response_headers["X-LUMA-Scheduler"] = str(payload.scheduler)
+            if payload.clip_skip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(payload.clip_skip)
+            # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
+                headers=response_headers,
+            )
 
     # ตรวจภาพที่อัปโหลดและพารามิเตอร์แก้ไขก่อนส่งต่อการประมวลผล
     @app.post("/v1/edit", tags=["images"], dependencies=[private_api])
@@ -1099,62 +1266,67 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         except (ValueError, UnidentifiedImageError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
-        try:
-            if is_forge_provider(config):
-                result, seed = edit_forge_image(
-                    config,
-                    source,
-                    parsed_prompt,
-                    strength,
-                    seed,
-                    model=model,
-                    loras=parsed_loras,
-                    sampler=sampler,
-                    scheduler=scheduler,
-                    cfg_scale=cfg_scale,
-                    clip_skip=clip_skip,
-                )
-            else:
-                result = edit_development_image(
-                    source,
-                    parsed_prompt,
-                    strength,
-                    seed,
-                    model=model,
-                    loras=parsed_loras,
-                    sampler=sampler,
-                    scheduler=scheduler,
-                    cfg_scale=cfg_scale,
-                    clip_skip=clip_skip,
-                )
-        except ProviderUnavailable as exc:
-            raise ApiError("provider_unavailable", str(exc), 503) from exc
-        except ProviderError as exc:
-            raise ApiError("provider_error", str(exc), 502) from exc
-        buffer = io.BytesIO()
-        result.save(buffer, format="PNG", optimize=True)
-        active_sampler = sampler or config.get("FORGE_SAMPLER") or "Euler"
-        active_cfg = cfg_scale if cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
-        response_headers = {
-            "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
-            "X-LUMA-Seed": str(seed),
-            "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
-            "X-LUMA-Sampler": str(active_sampler),
-            "X-LUMA-CFG-Scale": str(active_cfg),
-        }
-        if model:
-            response_headers["X-LUMA-Model"] = str(model)
-        if parsed_loras:
-            response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
-        if scheduler:
-            response_headers["X-LUMA-Scheduler"] = str(scheduler)
-        if clip_skip is not None:
-            response_headers["X-LUMA-Clip-Skip"] = str(clip_skip)
-        return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
-            headers=response_headers,
-        )
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    result, seed = edit_forge_image(
+                        config,
+                        source,
+                        parsed_prompt,
+                        strength,
+                        seed,
+                        model=model,
+                        loras=parsed_loras,
+                        sampler=sampler,
+                        scheduler=scheduler,
+                        cfg_scale=cfg_scale,
+                        clip_skip=clip_skip,
+                    )
+                else:
+                    result = edit_development_image(
+                        source,
+                        parsed_prompt,
+                        strength,
+                        seed,
+                        model=model,
+                        loras=parsed_loras,
+                        sampler=sampler,
+                        scheduler=scheduler,
+                        cfg_scale=cfg_scale,
+                        clip_skip=clip_skip,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG", optimize=True)
+            active_sampler = sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = cfg_scale if cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
+                "X-LUMA-Seed": str(seed),
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Sampler": str(active_sampler),
+                "X-LUMA-CFG-Scale": str(active_cfg),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            if model:
+                response_headers["X-LUMA-Model"] = str(model)
+            if parsed_loras:
+                response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
+            if scheduler:
+                response_headers["X-LUMA-Scheduler"] = str(scheduler)
+            if clip_skip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(clip_skip)
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
+                headers=response_headers,
+            )
 
 
     return app
