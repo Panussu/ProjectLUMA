@@ -219,6 +219,7 @@ class GenerateRequest(BaseModel):
     scheduler: str | None = None
     cfg_scale: float | None = None
     clip_skip: int | None = None
+    style_preset: str | None = None
 
 
     # ตรวจ prompt ผ่านกฎกลางก่อนสร้างโมเดลคำขอ
@@ -305,6 +306,13 @@ class GenerateRequest(BaseModel):
         if not 1 <= val <= 12:
             raise ValueError("clip_skip must be between 1 and 12.")
         return val
+
+    @field_validator("style_preset", mode="before")
+    @classmethod
+    def validate_style_preset(cls, value: Any) -> str | None:
+        if value in (None, ""):
+            return None
+        return str(value).strip()
 
 
 # ตรวจชื่อ provider ว่าต้องเรียก Forge หรือใช้ตัวสร้างภาพทดสอบ
@@ -587,6 +595,203 @@ ASPECT_RATIOS: list[dict[str, Any]] = [
     {"label": "1:1 Classic Square (512x512)", "width": 512, "height": 512, "aspect_ratio": "1:1", "recommended_for": "SD 1.5 Legacy"},
 ]
 
+# คอลเลกชัน Style Presets พร้อมคำอธิบาย ตัวปรับแต่ง Prompt และพารามิเตอร์ที่เหมาะสม
+STYLE_PRESETS: list[dict[str, Any]] = [
+    {
+        "id": "anime_illustrious",
+        "name": "Anime Masterpiece",
+        "category": "Anime & Manga",
+        "description": "Top-tier modern anime style with clean cel-shading, expressive eyes, vibrant colors, and sharp linework (Illustrious / Animagine / SDXL).",
+        "prompt_prefix": "masterpiece, best quality, ultra-detailed anime illustration,",
+        "prompt_suffix": "vibrant colors, clean sharp lineart, anime aesthetic, dynamic composition, 8k resolution",
+        "negative_prompt": "photorealistic, real photo, 3d render, deformed, bad anatomy, bad hands, missing fingers, extra limbs, low quality, blurry, watermark",
+        "recommended_sampler": "DPM++ 2M Karras",
+        "recommended_scheduler": "Karras",
+        "cfg_scale": 7.0,
+        "recommended_steps": 28,
+        "clip_skip": 2,
+    },
+    {
+        "id": "cyberpunk_neon",
+        "name": "Cyberpunk & Sci-Fi Neon",
+        "category": "Sci-Fi & Futuristic",
+        "description": "Futuristic dystopian cityscapes, neon reflections, glowing holograms, and high-tech cybernetics.",
+        "prompt_prefix": "cyberpunk aesthetic, high-tech dystopian city, neon glow,",
+        "prompt_suffix": "volumetric lighting, holographic displays, chromatic aberration, ray tracing, octane render, photorealistic sci-fi, 8k",
+        "negative_prompt": "vintage, rustic, medieval, low resolution, washed out, blurry, cartoon, flat colors",
+        "recommended_sampler": "Euler a",
+        "recommended_scheduler": "Simple",
+        "cfg_scale": 7.5,
+        "recommended_steps": 26,
+        "clip_skip": 2,
+    },
+    {
+        "id": "photorealistic_cinematic",
+        "name": "Cinematic Film Photography",
+        "category": "Photorealistic",
+        "description": "True-to-life 35mm film photography with shallow depth of field, natural lighting, and authentic skin texture.",
+        "prompt_prefix": "raw cinematic photo, 35mm film photography, award winning portrait,",
+        "prompt_suffix": "natural skin texture, subsurface scattering, bokeh, golden hour lighting, shot on ARRI Alexa, photorealistic, 8k uhd",
+        "negative_prompt": "anime, cartoon, graphic, drawing, painting, illustration, 3d render, plastic smooth skin, oversaturated, deformed, watermark",
+        "recommended_sampler": "DPM++ 2M SDE Karras",
+        "recommended_scheduler": "Karras",
+        "cfg_scale": 6.0,
+        "recommended_steps": 32,
+        "clip_skip": 1,
+    },
+    {
+        "id": "fantasy_oil_painting",
+        "name": "Fantasy Classical Oil Painting",
+        "category": "Artistic & Traditional",
+        "description": "Rich, painterly oil on canvas with expressive brushstrokes, chiaroscuro lighting, and mythic grandeur.",
+        "prompt_prefix": "epic fantasy oil painting, classical masterpiece style,",
+        "prompt_suffix": "visible brush strokes, dramatic chiaroscuro lighting, rich oil canvas texture, trending on ArtStation, museum quality",
+        "negative_prompt": "photograph, modern, 3d render, flat digital art, low contrast, oversaturated, vector",
+        "recommended_sampler": "DPM++ 2S a Karras",
+        "recommended_scheduler": "Karras",
+        "cfg_scale": 7.5,
+        "recommended_steps": 30,
+        "clip_skip": 2,
+    },
+    {
+        "id": "studio_ghibli",
+        "name": "Studio Ghibli Nostalgia",
+        "category": "Anime & Manga",
+        "description": "Heartwarming hand-painted anime aesthetic inspired by Hayao Miyazaki, lush nature, and whimsical blue skies.",
+        "prompt_prefix": "studio ghibli aesthetic, anime scenery, hayao miyazaki style,",
+        "prompt_suffix": "hand-painted watercolor background, lush greenery, nostalgic afternoon atmosphere, whimsical, soft pastel colors, clouds",
+        "negative_prompt": "dark, moody, photorealistic, 3d, neon, gritty, high contrast, harsh shadows, horror",
+        "recommended_sampler": "Euler a",
+        "recommended_scheduler": "Simple",
+        "cfg_scale": 7.0,
+        "recommended_steps": 24,
+        "clip_skip": 2,
+    },
+    {
+        "id": "dark_fantasy",
+        "name": "Dark Fantasy & Gothic",
+        "category": "Artistic & Traditional",
+        "description": "Grimdark atmosphere with eldritch ruins, ornate gothic armor, atmospheric fog, and dramatic rim lighting.",
+        "prompt_prefix": "dark fantasy aesthetic, grimdark gothic atmosphere, eldritch,",
+        "prompt_suffix": "fog and embers, dramatic rim light, intricate gothic armor, moody color grading, detailed dark art, 8k",
+        "negative_prompt": "bright, cheerful, cute, anime, pastel, low detail, flat lighting, sunny",
+        "recommended_sampler": "DPM++ 2M Karras",
+        "recommended_scheduler": "Exponential",
+        "cfg_scale": 7.0,
+        "recommended_steps": 30,
+        "clip_skip": 2,
+    },
+    {
+        "id": "pixel_art",
+        "name": "Retro 16-Bit Pixel Art",
+        "category": "Digital Art & Retro",
+        "description": "Charming nostalgic 16-bit arcade and SNES era pixel graphics with dithering and hand-placed sprites.",
+        "prompt_prefix": "pixel art masterpiece, 16-bit retro game visual,",
+        "prompt_suffix": "isometric view, pixelated dithering, nostalgic arcade game aesthetic, vibrant limited palette, crisp pixel edges",
+        "negative_prompt": "smooth gradient, high-res photo, 3d render, blurry, vector art, realistic",
+        "recommended_sampler": "Euler",
+        "recommended_scheduler": "Normal",
+        "cfg_scale": 7.0,
+        "recommended_steps": 20,
+        "clip_skip": 1,
+    },
+    {
+        "id": "vaporwave_synthwave",
+        "name": "Synthwave & Vaporwave 80s",
+        "category": "Sci-Fi & Futuristic",
+        "description": "Retro 80s synthwave neon grid, glowing cyan and magenta wireframes, palm trees, and VHS nostalgia.",
+        "prompt_prefix": "synthwave retro 80s aesthetic, vaporwave neon dream,",
+        "prompt_suffix": "purple and cyan sunset, wireframe grid, VHS tape glitch artifact, retrofuturistic, nostalgic, outrun",
+        "negative_prompt": "modern photo, natural landscape, monochrome, dull, low quality, washed out",
+        "recommended_sampler": "Euler a",
+        "recommended_scheduler": "Simple",
+        "cfg_scale": 7.5,
+        "recommended_steps": 25,
+        "clip_skip": 2,
+    },
+    {
+        "id": "manga_lineart",
+        "name": "Japanese Manga Ink & Screentone",
+        "category": "Anime & Manga",
+        "description": "High-contrast monochrome Japanese comic art with screentone shading, dynamic hatching, and bold ink lines.",
+        "prompt_prefix": "clean black and white manga illustration, authentic Japanese comic style,",
+        "prompt_suffix": "screentone shading, dynamic ink linework, cross-hatching, high contrast monochrome, shonen jump cover art",
+        "negative_prompt": "color, colored, watercolor, photorealistic, 3d, gradient, blurry",
+        "recommended_sampler": "Euler",
+        "recommended_scheduler": "Normal",
+        "cfg_scale": 8.0,
+        "recommended_steps": 22,
+        "clip_skip": 2,
+    },
+    {
+        "id": "watercolor_splatter",
+        "name": "Watercolor & Fluid Ink",
+        "category": "Artistic & Traditional",
+        "description": "Expressive fluid watercolor pigments on cold-press textured paper with organic water blooms and delicate edges.",
+        "prompt_prefix": "delicate watercolor painting, flowing ink wash and pigments,",
+        "prompt_suffix": "paper texture, organic color bleeds, translucent layers, soft edges, ethereal fine art, artistic splatters",
+        "negative_prompt": "solid digital lines, 3d render, sharp geometric edges, photorealistic, harsh contrast",
+        "recommended_sampler": "Euler a",
+        "recommended_scheduler": "Simple",
+        "cfg_scale": 6.5,
+        "recommended_steps": 25,
+        "clip_skip": 2,
+    },
+]
+
+# ดึงข้อมูล Style Preset ตาม id หรือค้นหาจากชื่อ
+def get_style_preset_by_id(identifier: str | None) -> dict[str, Any] | None:
+    if not identifier:
+        return None
+    key = identifier.strip().casefold()
+    for preset in STYLE_PRESETS:
+        if preset["id"].casefold() == key or preset["name"].casefold() == key:
+            return preset
+        if key in preset["id"].casefold():
+            return preset
+    return None
+
+# ปรับแต่ง Prompt และพารามิเตอร์ตาม Style Preset ที่เลือก
+def apply_style_preset(
+    preset_id: str | None,
+    prompt: str,
+    negative_prompt: str = "",
+    sampler: str | None = None,
+    scheduler: str | None = None,
+    cfg_scale: float | None = None,
+    clip_skip: int | None = None,
+    steps: int | None = None,
+) -> tuple[str, str, str | None, str | None, float | None, int | None, int | None, dict[str, Any] | None]:
+    preset = get_style_preset_by_id(preset_id)
+    if not preset:
+        return prompt, negative_prompt, sampler, scheduler, cfg_scale, clip_skip, steps, None
+
+    enhanced_prompt = prompt
+    prefix = preset.get("prompt_prefix", "")
+    suffix = preset.get("prompt_suffix", "")
+    if prefix and prefix.casefold() not in prompt.casefold():
+        enhanced_prompt = f"{prefix} {enhanced_prompt}"
+    if suffix and suffix.casefold() not in prompt.casefold():
+        enhanced_prompt = f"{enhanced_prompt}, {suffix}"
+
+    preset_neg = preset.get("negative_prompt", "")
+    if preset_neg:
+        if negative_prompt and negative_prompt.strip():
+            enhanced_neg = f"{negative_prompt.strip()}, {preset_neg}"
+        else:
+            enhanced_neg = preset_neg
+    else:
+        enhanced_neg = negative_prompt
+
+    eff_sampler = sampler or preset.get("recommended_sampler")
+    eff_scheduler = scheduler or preset.get("recommended_scheduler")
+    eff_cfg = cfg_scale if cfg_scale is not None else preset.get("cfg_scale")
+    eff_clip = clip_skip if clip_skip is not None else preset.get("clip_skip")
+    eff_steps = steps if (steps is not None and steps != 20) else (preset.get("recommended_steps") or steps or 20)
+
+    return enhanced_prompt, enhanced_neg, eff_sampler, eff_scheduler, eff_cfg, eff_clip, eff_steps, preset
+
+
 
 # ดึงรายชื่อ Sampler จาก Forge ถ้าเปิดอยู่ หรือส่งคืนรายการมาตรฐานที่เตรียมไว้
 def get_supported_samplers(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -815,6 +1020,7 @@ def generate_development_image(
     scheduler: str | None = None,
     cfg_scale: float | None = None,
     clip_skip: int | None = None,
+    style_preset: str | None = None,
 ) -> Image.Image:
     rng = random.Random(seed)
     palette = _palette(rng)
@@ -865,6 +1071,8 @@ def generate_development_image(
     badge = f"LUMA DEV  /  SEED {seed}"
     if model:
         badge += f"  /  {model}"
+    if style_preset:
+        badge += f"  /  {style_preset.upper()}"
     overlay_draw.text((margin * 1.6, height - margin * 1.7), badge, font=ImageFont.load_default(), fill=(190, 180, 230, 210))
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
@@ -881,6 +1089,7 @@ def edit_development_image(
     scheduler: str | None = None,
     cfg_scale: float | None = None,
     clip_skip: int | None = None,
+    style_preset: str | None = None,
 ) -> Image.Image:
 
     image = ImageOps.exif_transpose(source).convert("RGB")
@@ -1115,9 +1324,28 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             },
             "aspect_ratios": ASPECT_RATIOS,
             "presets": QUALITY_PRESETS,
+            "styles": STYLE_PRESETS,
             "total_models": len(installed_models),
             "total_loras": len(scan_installed_loras(config)),
         }
+
+    # ดึงรายชื่อ Style Presets ทั้งหมดที่รองรับ พร้อมคำอธิบายและตัวปรับแต่ง Prompt
+    @app.get("/v1/styles", tags=["styles"], dependencies=[private_api])
+    def styles():
+        categories = sorted(list({p["category"] for p in STYLE_PRESETS}))
+        return {
+            "styles": STYLE_PRESETS,
+            "count": len(STYLE_PRESETS),
+            "categories": categories,
+        }
+
+    # ดึงรายละเอียดเฉพาะของ Style Preset ตาม id
+    @app.get("/v1/styles/{style_id}", tags=["styles"], dependencies=[private_api])
+    def style_detail(style_id: str):
+        preset = get_style_preset_by_id(style_id)
+        if not preset:
+            return error_response("not_found", f"Style preset '{style_id}' not found.", 404)
+        return preset
 
     # ดึงสถานะคิวและการใช้งาน GPU แบบเรียลไทม์
     @app.get("/v1/queue/status", tags=["queue"], dependencies=[private_api])
@@ -1153,37 +1381,48 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
     # ตรวจข้อมูลสร้างภาพแล้วส่งต่อการประมวลผลตามหน้าที่ของบริการนี้
     @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
     def generate(payload: GenerateRequest):
+        effective_prompt, effective_neg, effective_sampler, effective_sched, effective_cfg, effective_clip, effective_steps, matched_style = apply_style_preset(
+            payload.style_preset,
+            payload.prompt,
+            negative_prompt=payload.negative_prompt,
+            sampler=payload.sampler,
+            scheduler=payload.scheduler,
+            cfg_scale=payload.cfg_scale,
+            clip_skip=payload.clip_skip,
+            steps=payload.steps,
+        )
         with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
-            seed = prompt_seed(payload.prompt, payload.seed)
+            seed = prompt_seed(effective_prompt, payload.seed)
             try:
                 if is_forge_provider(config):
                     image, seed = generate_forge_image(
                         config,
-                        payload.prompt,
-                        payload.negative_prompt,
+                        effective_prompt,
+                        effective_neg,
                         payload.width,
                         payload.height,
                         seed,
-                        payload.steps,
+                        effective_steps or payload.steps,
                         model=payload.model,
                         loras=payload.loras,
-                        sampler=payload.sampler,
-                        scheduler=payload.scheduler,
-                        cfg_scale=payload.cfg_scale,
-                        clip_skip=payload.clip_skip,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
                     )
                 else:
                     image = generate_development_image(
-                        payload.prompt,
+                        effective_prompt,
                         payload.width,
                         payload.height,
                         seed,
                         model=payload.model,
                         loras=payload.loras,
-                        sampler=payload.sampler,
-                        scheduler=payload.scheduler,
-                        cfg_scale=payload.cfg_scale,
-                        clip_skip=payload.clip_skip,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                        style_preset=matched_style["id"] if matched_style else None,
                     )
             except ProviderUnavailable as exc:
                 raise ApiError("provider_unavailable", str(exc), 503) from exc
@@ -1192,8 +1431,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
             buffer = io.BytesIO()
             image.save(buffer, format="PNG", optimize=True)
-            active_sampler = payload.sampler or config.get("FORGE_SAMPLER") or "Euler"
-            active_cfg = payload.cfg_scale if payload.cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            active_sampler = effective_sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = effective_cfg if effective_cfg is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
             current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
             response_headers = {
                 "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
@@ -1201,7 +1440,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
                 "X-LUMA-Sampler": str(active_sampler),
                 "X-LUMA-CFG-Scale": str(active_cfg),
-                "X-LUMA-Steps": str(payload.steps),
+                "X-LUMA-Steps": str(effective_steps or payload.steps),
                 "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
                 "X-LUMA-Execution-Ms": str(current_exec_ms),
                 "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
@@ -1210,10 +1449,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 response_headers["X-LUMA-Model"] = str(payload.model)
             if payload.loras:
                 response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
-            if payload.scheduler:
-                response_headers["X-LUMA-Scheduler"] = str(payload.scheduler)
-            if payload.clip_skip is not None:
-                response_headers["X-LUMA-Clip-Skip"] = str(payload.clip_skip)
+            if effective_sched:
+                response_headers["X-LUMA-Scheduler"] = str(effective_sched)
+            if effective_clip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(effective_clip)
+            if matched_style:
+                response_headers["X-LUMA-Style-Preset"] = str(matched_style["id"])
             # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
             return Response(
                 content=buffer.getvalue(),
@@ -1234,6 +1475,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         scheduler: Annotated[str | None, Form()] = None,
         cfg_scale_value: Annotated[str | None, Form(alias="cfg_scale")] = None,
         clip_skip_value: Annotated[str | None, Form(alias="clip_skip")] = None,
+        style_preset: Annotated[str | None, Form(alias="style_preset")] = None,
     ):
         if not image.filename:
             raise ApiError("validation_error", "An image file is required.", 400)
@@ -1266,34 +1508,44 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         except (ValueError, UnidentifiedImageError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
+        effective_prompt, _, effective_sampler, effective_sched, effective_cfg, effective_clip, _, matched_style = apply_style_preset(
+            style_preset,
+            parsed_prompt,
+            sampler=sampler,
+            scheduler=scheduler,
+            cfg_scale=cfg_scale,
+            clip_skip=clip_skip,
+        )
+
         with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
             try:
                 if is_forge_provider(config):
                     result, seed = edit_forge_image(
                         config,
                         source,
-                        parsed_prompt,
+                        effective_prompt,
                         strength,
                         seed,
                         model=model,
                         loras=parsed_loras,
-                        sampler=sampler,
-                        scheduler=scheduler,
-                        cfg_scale=cfg_scale,
-                        clip_skip=clip_skip,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
                     )
                 else:
                     result = edit_development_image(
                         source,
-                        parsed_prompt,
+                        effective_prompt,
                         strength,
                         seed,
                         model=model,
                         loras=parsed_loras,
-                        sampler=sampler,
-                        scheduler=scheduler,
-                        cfg_scale=cfg_scale,
-                        clip_skip=clip_skip,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                        style_preset=matched_style["id"] if matched_style else None,
                     )
             except ProviderUnavailable as exc:
                 raise ApiError("provider_unavailable", str(exc), 503) from exc
@@ -1301,8 +1553,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 raise ApiError("provider_error", str(exc), 502) from exc
             buffer = io.BytesIO()
             result.save(buffer, format="PNG", optimize=True)
-            active_sampler = sampler or config.get("FORGE_SAMPLER") or "Euler"
-            active_cfg = cfg_scale if cfg_scale is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            active_sampler = effective_sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = effective_cfg if effective_cfg is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
             current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
             response_headers = {
                 "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
@@ -1318,10 +1570,12 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 response_headers["X-LUMA-Model"] = str(model)
             if parsed_loras:
                 response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
-            if scheduler:
-                response_headers["X-LUMA-Scheduler"] = str(scheduler)
-            if clip_skip is not None:
-                response_headers["X-LUMA-Clip-Skip"] = str(clip_skip)
+            if effective_sched:
+                response_headers["X-LUMA-Scheduler"] = str(effective_sched)
+            if effective_clip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(effective_clip)
+            if matched_style:
+                response_headers["X-LUMA-Style-Preset"] = str(matched_style["id"])
             return Response(
                 content=buffer.getvalue(),
                 media_type="image/png",
