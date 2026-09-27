@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import time
 import uuid
@@ -120,10 +121,15 @@ def process_job(app: Flask, job_id: str) -> None:
                     "steps": job.steps,
                     "seed": job.seed,
                 }
+                if job.ai_options:
+                    payload.update(job.ai_options.request_options)
                 response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers, timeout=timeout)
             else:
                 source_to_remove = Path(app.config["UPLOAD_ROOT"]) / str(job.source_filename)
                 form = {"prompt": job.prompt, "strength": str(job.strength), "seed": str(job.seed)}
+                if job.ai_options:
+                    for key, value in job.ai_options.request_options.items():
+                        form[key] = json.dumps(value) if key == "loras" else str(value)
                 with source_to_remove.open("rb") as source:
                     response = requests.post(
                         f"{base_url}/v1/edit",
@@ -166,6 +172,30 @@ def process_job(app: Flask, job_id: str) -> None:
             job.provider = response.headers.get("X-LUMA-Provider", "unknown")[:80]
             if parsed_seed is not None:
                 job.seed = parsed_seed
+            if job.ai_options:
+                result_options = {}
+                for field, header in (
+                    ("model", "X-LUMA-Model"),
+                    ("sampler", "X-LUMA-Sampler"),
+                    ("scheduler", "X-LUMA-Scheduler"),
+                    ("style_preset", "X-LUMA-Style-Preset"),
+                ):
+                    if response.headers.get(header):
+                        result_options[field] = response.headers[header][:255]
+                for field, header in (("steps", "X-LUMA-Steps"), ("clip_skip", "X-LUMA-Clip-Skip")):
+                    if response.headers.get(header):
+                        try:
+                            result_options[field] = int(response.headers[header])
+                        except ValueError:
+                            logger.warning("Ignoring invalid %s header for job %s", header, job_id)
+                if response.headers.get("X-LUMA-CFG-Scale"):
+                    try:
+                        result_options["cfg_scale"] = float(response.headers["X-LUMA-CFG-Scale"])
+                    except ValueError:
+                        logger.warning("Ignoring invalid CFG scale header for job %s", job_id)
+                job.ai_options.result_options = result_options
+                if "steps" in result_options:
+                    job.steps = result_options["steps"]
             # บันทึกสถานะสำเร็จและเวลาเมื่อจัดเก็บผลลัพธ์แล้ว
             job.status = "completed"
             job.progress = 100

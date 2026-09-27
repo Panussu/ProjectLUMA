@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import json
 import re
 import secrets
 import uuid
@@ -13,7 +14,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from PIL import Image, UnidentifiedImageError
 
 from .extensions import db
-from .models import Job
+from .models import Job, JobAIOptions
 from .worker import queue_job
 
 jobs_blueprint = Blueprint("jobs", __name__)
@@ -52,6 +53,61 @@ def parse_prompt(value) -> str:
     return prompt
 
 
+def parse_ai_options(data: dict) -> dict:
+    """Validate optional generation controls before persisting or forwarding them."""
+    options = {}
+    for field in ("model", "sampler", "scheduler", "style_preset"):
+        value = data.get(field)
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be a string.")
+        value = value.strip()
+        if not value or len(value) > 255 or any(ord(char) < 32 for char in value):
+            raise ValueError(f"{field} must be a non-empty string of at most 255 characters.")
+        options[field] = value
+
+    if data.get("cfg_scale") not in (None, ""):
+        try:
+            value = float(data["cfg_scale"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("cfg_scale must be a number.") from exc
+        if not math.isfinite(value) or not 1 <= value <= 30:
+            raise ValueError("cfg_scale must be between 1 and 30.")
+        options["cfg_scale"] = value
+    if data.get("clip_skip") not in (None, ""):
+        options["clip_skip"] = parse_integer(data["clip_skip"], "clip_skip", 1, 12)
+
+    loras = data.get("loras")
+    if loras is not None:
+        if not isinstance(loras, list) or len(loras) > 8:
+            raise ValueError("loras must be a list of at most 8 items.")
+        parsed_loras = []
+        for item in loras:
+            if isinstance(item, str):
+                name = item.strip()
+                parsed = name
+            elif isinstance(item, dict) and set(item) <= {"name", "weight"}:
+                name = item.get("name")
+                if not isinstance(name, str):
+                    raise ValueError("Each LoRA must have a valid name.")
+                name = name.strip()
+                try:
+                    weight = float(item.get("weight", 1.0))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("LoRA weight must be a number.") from exc
+                if not math.isfinite(weight) or not 0 <= weight <= 2:
+                    raise ValueError("LoRA weight must be between 0 and 2.")
+                parsed = {"name": name, "weight": weight}
+            else:
+                raise ValueError("Each LoRA must be a name or an object with name and weight.")
+            if not name or len(name) > 255 or any(char in name for char in "<>:\\/") or any(ord(char) < 32 for char in name):
+                raise ValueError("Each LoRA must have a valid name.")
+            parsed_loras.append(parsed)
+        options["loras"] = parsed_loras
+    return options
+
+
 # อ่าน ID เจ้าของคำขอจาก JWT ที่ผ่านการตรวจแล้ว
 def current_user_id() -> int:
     return int(get_jwt_identity())
@@ -80,6 +136,8 @@ def serialized(job: Job) -> dict:
 @jwt_required()
 def generate():
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return error_response("validation_error", "The request body must be a JSON object.", 400)
     try:
         prompt = parse_prompt(data.get("prompt"))
         raw_negative_prompt = data.get("negative_prompt", "")
@@ -94,6 +152,7 @@ def generate():
             raise ValueError("Width and height must be divisible by 64.")
         steps = parse_integer(data.get("steps", 20), "steps", 1, 50)
         seed = parse_integer(data.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
+        ai_options = parse_ai_options(data)
     except ValueError as exc:
         return error_response("validation_error", str(exc), 400)
 
@@ -108,6 +167,7 @@ def generate():
         height=height,
         steps=steps,
         seed=seed,
+        ai_options=JobAIOptions(request_options=ai_options),
     )
     db.session.add(job)
     db.session.commit()
@@ -132,6 +192,12 @@ def edit():
         if not math.isfinite(strength) or not 0 <= strength <= 1:
             raise ValueError("Strength must be between 0 and 1.")
         seed = parse_integer(request.form.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
+        raw_loras = request.form.get("loras")
+        try:
+            loras = json.loads(raw_loras) if raw_loras else None
+        except ValueError as exc:
+            raise ValueError("loras must be a JSON list.") from exc
+        ai_options = parse_ai_options({**request.form.to_dict(), "loras": loras})
         with Image.open(upload.stream) as image:
             image.verify()
             image_format = image.format
@@ -159,6 +225,7 @@ def edit():
             strength=strength,
             seed=seed,
             source_filename=source_filename,
+            ai_options=JobAIOptions(request_options=ai_options),
         )
         db.session.add(job)
         db.session.commit()

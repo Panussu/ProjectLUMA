@@ -59,6 +59,7 @@ class Job(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
     completed_at = db.Column(db.DateTime(timezone=True))
     user = db.relationship("User", back_populates="jobs")
+    ai_options = db.relationship("JobAIOptions", back_populates="job", uselist=False, cascade="all, delete-orphan")
 
     # เลือกข้อมูลที่เปิดเผยผ่าน API และแปลงเวลาเป็นข้อความสำหรับ JSON
     def to_dict(self, result_url: str | None = None) -> dict:
@@ -75,10 +76,21 @@ class Job(db.Model):
             "seed": self.seed,
             "strength": self.strength,
             "provider": self.provider,
+            "ai_options": self.ai_options.request_options if self.ai_options else {},
+            "ai_result": self.ai_options.result_options if self.ai_options else {},
             "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
             "updated_at": self.updated_at.isoformat().replace("+00:00", "Z"),
             "completed_at": self.completed_at.isoformat().replace("+00:00", "Z") if self.completed_at else None,
             "result_url": result_url,
             "error": self.error,
         }
+
+
+class JobAIOptions(db.Model):
+    """Keep AiEngine options in a separate table so existing job databases remain usable."""
+
+    job_id = db.Column(db.String(36), db.ForeignKey("job.id"), primary_key=True)
+    request_options = db.Column(db.JSON, nullable=False, default=dict)
+    result_options = db.Column(db.JSON, nullable=False, default=dict)
+    job = db.relationship("Job", back_populates="ai_options")
 
