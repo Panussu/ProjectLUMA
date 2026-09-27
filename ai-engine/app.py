@@ -75,6 +75,7 @@ class GenerationQueueManager:
         self._total_wait_time_ms = 0.0
         self._total_exec_time_ms = 0.0
         self._start_time = time.time()
+        self._active_job_start: float = 0.0
 
     @property
     def active_jobs(self) -> int:
@@ -108,6 +109,66 @@ class GenerationQueueManager:
                 "uptime_seconds": round(time.time() - self._start_time, 1),
             }
 
+    def live_progress_simulation(self, default_steps: int = 20, include_preview: bool = False) -> dict[str, Any]:
+        with self._lock:
+            active = self._active_jobs > 0
+            start_ts = self._active_job_start
+            completed = self._total_completed
+            total_exec = self._total_exec_time_ms
+
+        if not active or start_ts <= 0.0:
+            return {
+                "active": False,
+                "progress": 0.0,
+                "progress_percent": 0.0,
+                "sampling_step": 0,
+                "sampling_steps": 0,
+                "eta_relative": 0.0,
+                "interrupted": False,
+                "preview_image": None,
+                "preview_available": False,
+            }
+
+        elapsed = max(0.001, time.perf_counter() - start_ts)
+        avg_exec_sec = (total_exec / completed / 1000.0) if completed > 0 else 2.5
+        avg_exec_sec = max(0.5, avg_exec_sec)
+
+        ratio = elapsed / avg_exec_sec
+        if ratio < 1.0:
+            progress = min(0.95, max(0.05, ratio))
+        else:
+            progress = min(0.98, 0.95 + 0.03 * (1.0 - (1.0 / (1.0 + (ratio - 1.0)))))
+
+        total_steps = max(1, default_steps)
+        current_step = min(total_steps, max(1, int(round(progress * total_steps))))
+        eta = max(0.0, round(avg_exec_sec - elapsed, 1)) if elapsed < avg_exec_sec else 0.5
+
+        preview_b64 = None
+        if include_preview:
+            try:
+                preview_img = Image.new("RGB", (64, 64), color=(30, 32, 48))
+                draw = ImageDraw.Draw(preview_img)
+                box_color = (int(60 + 100 * progress), int(100 + 80 * progress), int(200 + 40 * progress))
+                draw.rectangle([8, 8, 56, 56], fill=box_color)
+                buf = io.BytesIO()
+                preview_img.save(buf, format="PNG")
+                raw_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                preview_b64 = f"data:image/png;base64,{raw_b64}"
+            except Exception:
+                preview_b64 = None
+
+        return {
+            "active": True,
+            "progress": round(progress, 4),
+            "progress_percent": round(progress * 100.0, 1),
+            "sampling_step": current_step,
+            "sampling_steps": total_steps,
+            "eta_relative": eta,
+            "interrupted": False,
+            "preview_image": preview_b64,
+            "preview_available": preview_b64 is not None,
+        }
+
     @contextmanager
     def acquire(self, timeout: float | None = None):
         req_timeout = timeout if timeout is not None else self.default_timeout
@@ -138,6 +199,7 @@ class GenerationQueueManager:
             with self._lock:
                 self._queued_jobs -= 1
                 self._active_jobs += 1
+                self._active_job_start = time.perf_counter()
                 remaining_queued = self._queued_jobs
 
             exec_start = time.perf_counter()
@@ -162,6 +224,9 @@ class GenerationQueueManager:
             finally:
                 with self._lock:
                     self._active_jobs -= 1
+                    if self._active_jobs <= 0:
+                        self._active_jobs = 0
+                        self._active_job_start = 0.0
                 self._semaphore.release()
         finally:
             if not acquired:
@@ -427,6 +492,82 @@ def scan_installed_loras(config: dict[str, Any]) -> list[dict[str, Any]]:
                 "preview_url": f"/v1/preview/lora/{f.stem}" if has_preview else None,
             })
     return items
+
+
+# ดึงสถานะ Live Progress จาก WebUI Forge หรือระบบจำลองตาม Provider ที่กำลังทำงาน
+def get_live_progress(
+    config: dict[str, Any],
+    queue_manager: GenerationQueueManager,
+    include_preview: bool = False,
+) -> dict[str, Any]:
+    queue_info = {
+        "gpu_available": queue_manager.active_jobs < queue_manager.max_concurrency,
+        "active_jobs": queue_manager.active_jobs,
+        "queued_jobs": queue_manager.queued_jobs,
+        "max_concurrency": queue_manager.max_concurrency,
+    }
+
+    if is_forge_provider(config):
+        query_param = "false" if include_preview else "true"
+        try:
+            resp = forge_request(config, "GET", f"/sdapi/v1/progress?skip_current_image={query_param}")
+            data = resp.json()
+            progress = round(float(data.get("progress", 0.0)), 4)
+            eta = round(float(data.get("eta_relative", 0.0)), 1)
+            state = data.get("state") or {}
+            step = int(state.get("sampling_step", 0))
+            steps = int(state.get("sampling_steps", 0))
+            interrupted = bool(state.get("interrupted", False))
+            current_img = data.get("current_image")
+
+            preview_b64 = None
+            if include_preview and current_img:
+                current_img_str = str(current_img).strip()
+                if current_img_str.startswith("data:image"):
+                    preview_b64 = current_img_str
+                else:
+                    preview_b64 = f"data:image/png;base64,{current_img_str}"
+
+            is_active = progress > 0.0 or step > 0 or queue_manager.active_jobs > 0
+
+            return {
+                "status": "ok",
+                "active": is_active,
+                "progress": progress,
+                "progress_percent": round(progress * 100.0, 1),
+                "sampling_step": step,
+                "sampling_steps": steps,
+                "eta_relative": eta,
+                "interrupted": interrupted,
+                "preview_image": preview_b64,
+                "preview_available": preview_b64 is not None,
+                "provider": "forge",
+                "queue": queue_info,
+            }
+        except Exception:
+            sim = queue_manager.live_progress_simulation(
+                default_steps=int(config.get("FORGE_DEFAULT_STEPS", 20)),
+                include_preview=include_preview,
+            )
+            sim.update({
+                "status": "ok",
+                "provider": "forge",
+                "forge_connected": False,
+                "queue": queue_info,
+            })
+            return sim
+
+    # Development-procedural provider simulation
+    sim = queue_manager.live_progress_simulation(
+        default_steps=20,
+        include_preview=include_preview,
+    )
+    sim.update({
+        "status": "ok",
+        "provider": "development-procedural",
+        "queue": queue_info,
+    })
+    return sim
 
 
 # รายการ Sampler มาตรฐานพร้อมคำอธิบายและจำนวน steps แนะนำ
@@ -1176,6 +1317,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
     # เก็บค่ากำหนดและตัวจัดการคิวไว้กับแอปเพื่อให้ endpoint ใช้ร่วมกัน
     app.state.config = config
     app.state.queue = queue_manager
+    app.state.queue_manager = queue_manager
 
     # แปลง ApiError เป็นคำตอบ JSON ตามรหัสที่บริการกำหนด
     @app.exception_handler(ApiError)
@@ -1346,6 +1488,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         if not preset:
             return error_response("not_found", f"Style preset '{style_id}' not found.", 404)
         return preset
+
+    # ดึงสถานะความคืบหน้าการสร้างภาพแบบเรียลไทม์ (Live Progress) พร้อมขั้นตอนและภาพพรีวิว
+    @app.get("/v1/progress", tags=["progress", "queue"], dependencies=[private_api])
+    def progress(include_preview: bool = False):
+        return get_live_progress(config, queue_manager, include_preview=include_preview)
 
     # ดึงสถานะคิวและการใช้งาน GPU แบบเรียลไทม์
     @app.get("/v1/queue/status", tags=["queue"], dependencies=[private_api])
