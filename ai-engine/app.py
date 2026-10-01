@@ -1134,6 +1134,29 @@ def edit_forge_image(
     return decode_forge_image(response, seed)
 
 
+# ส่งภาพไปยัง WebUI Forge เพื่อถอดคำบรรยายหรือแท็กด้วย DeepDanbooru หรือ CLIP
+def interrogate_forge_image(
+    config: dict[str, Any],
+    source: Image.Image,
+    model: str = "deepdanbooru",
+) -> str:
+    image = ImageOps.exif_transpose(source).convert("RGB")
+    image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
+    source_buffer = io.BytesIO()
+    image.save(source_buffer, format="PNG")
+    b64_image = base64.b64encode(source_buffer.getvalue()).decode("ascii")
+    payload = {
+        "image": f"data:image/png;base64,{b64_image}",
+        "model": model,
+    }
+    response = forge_request(config, "POST", "/sdapi/v1/interrogate", json=payload)
+    try:
+        data = response.json()
+        caption = str(data.get("caption") or "").strip()
+        return caption
+    except Exception as exc:
+        raise ProviderError(f"WebUI Forge returned invalid interrogate response: {response.text[:200]}") from exc
+
 
 # สร้างชุดสีจากตัวสุ่มที่กำหนด seed สำหรับภาพทดสอบ
 def _palette(rng: random.Random) -> list[tuple[int, int, int]]:
@@ -1261,6 +1284,55 @@ def edit_development_image(
     texture = Image.effect_noise(transformed.size, 10 + strength * 22).convert("RGB")
     textured = ImageChops.soft_light(tinted, texture)
     return Image.blend(image, textured, strength)
+
+
+# วิเคราะห์ภาพจำลองโดยประเมินสี สัดส่วน และความสว่าง เพื่อสร้างแท็ก DeepDanbooru หรือคำบรรยาย
+def interrogate_development_image(source: Image.Image, model: str = "deepdanbooru") -> str:
+    image = ImageOps.exif_transpose(source).convert("RGB")
+    thumb = image.resize((16, 16), Image.Resampling.BILINEAR)
+    pixels = list(thumb.getdata())
+    avg_r = sum(p[0] for p in pixels) / len(pixels)
+    avg_g = sum(p[1] for p in pixels) / len(pixels)
+    avg_b = sum(p[2] for p in pixels) / len(pixels)
+    brightness = (avg_r * 299 + avg_g * 587 + avg_b * 114) / 1000
+
+    aspect_ratio = image.width / max(1, image.height)
+    tags: list[str] = []
+
+    # Aspect ratio / composition
+    if aspect_ratio < 0.85:
+        tags.extend(["1girl", "solo", "portrait", "upper_body"])
+    elif aspect_ratio > 1.25:
+        tags.extend(["scenery", "landscape", "outdoors", "wide_shot"])
+    else:
+        tags.extend(["1girl", "solo", "close_up"])
+
+    # Brightness / atmosphere
+    if brightness > 150:
+        tags.extend(["bright", "day", "sunlight"])
+    elif brightness < 80:
+        tags.extend(["dark", "night", "glowing", "dramatic_lighting"])
+    else:
+        tags.extend(["soft_lighting", "ambient_light"])
+
+    # Dominant tones
+    if avg_b > avg_r + 20 and avg_b > avg_g + 10:
+        tags.extend(["blue_theme", "blue_eyes", "sky"])
+    elif avg_r > avg_b + 20 and avg_r > avg_g + 10:
+        tags.extend(["warm_colors", "sunset", "red_hair"])
+    elif avg_g > avg_r + 15 and avg_g > avg_b + 15:
+        tags.extend(["nature", "greenery", "forest"])
+
+    # Quality & stylization tags
+    tags.extend(["looking_at_viewer", "smile", "highly_detailed", "masterpiece", "best_quality"])
+
+    if str(model).lower() == "clip":
+        subject = "1girl" if "1girl" in tags else "a scenic landscape"
+        lighting = "bright daylight" if brightness > 120 else "dramatic night lighting"
+        return f"a masterpiece digital artwork of {subject}, {lighting}, vibrant color palette, highly detailed background"
+
+    # Default to DeepDanbooru comma-separated tags
+    return ", ".join(tags)
 
 
 # ดึงข้อความจากข้อผิดพลาดตรวจข้อมูลของ FastAPI ให้ใช้รูปแบบเดียวกับ API
@@ -1467,6 +1539,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             "aspect_ratios": ASPECT_RATIOS,
             "presets": QUALITY_PRESETS,
             "styles": STYLE_PRESETS,
+            "interrogators": [
+                {"id": "deepdanbooru", "name": "DeepDanbooru", "output_format": "tags"},
+                {"id": "clip", "name": "CLIP / BLIP", "output_format": "prose"},
+            ],
             "total_models": len(installed_models),
             "total_loras": len(scan_installed_loras(config)),
         }
@@ -1606,6 +1682,87 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             return Response(
                 content=buffer.getvalue(),
                 media_type="image/png",
+                headers=response_headers,
+            )
+
+    # ดึงรายชื่อโมเดล Interrogator ที่รองรับ
+    @app.get("/v1/interrogate/models", tags=["images", "interrogate"], dependencies=[private_api])
+    def interrogate_models():
+        return {
+            "models": [
+                {
+                    "id": "deepdanbooru",
+                    "name": "DeepDanbooru",
+                    "description": "Booru anime tags format (e.g. 1girl, solo, blue eyes). Best for anime/manga models.",
+                    "output_format": "tags",
+                },
+                {
+                    "id": "clip",
+                    "name": "CLIP / BLIP",
+                    "description": "Natural language descriptive sentence. Best for photorealistic and general concepts.",
+                    "output_format": "prose",
+                },
+            ],
+            "default": "deepdanbooru",
+        }
+
+    # ถอดคำบรรยายหรือแท็ก Danbooru จากภาพอ้างอิงด้วย DeepDanbooru หรือ CLIP
+    @app.post("/v1/interrogate", tags=["images", "interrogate"], dependencies=[private_api])
+    def interrogate(
+        image: Annotated[UploadFile, File(description="Source image to interrogate")],
+        model: Annotated[str, Form(description="Interrogator model: deepdanbooru or clip")] = "deepdanbooru",
+    ):
+        if not image.filename:
+            raise ApiError("validation_error", "An image file is required.", 400)
+        try:
+            interrogate_model = str(model or "deepdanbooru").strip().lower()
+            if interrogate_model not in {"deepdanbooru", "clip"}:
+                raise ValueError("Model must be 'deepdanbooru' or 'clip'.")
+
+            image.file.seek(0, io.SEEK_END)
+            if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
+                raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
+            image.file.seek(0)
+            source = Image.open(image.file)
+            source.verify()
+            image.file.seek(0)
+            source = Image.open(image.file)
+            if source.width * source.height > MAX_DIMENSION * MAX_DIMENSION * 4:
+                raise ValueError("The input image has too many pixels.")
+        except ApiError:
+            raise
+        except (ValueError, UnidentifiedImageError) as exc:
+            raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
+
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    caption = interrogate_forge_image(config, source, model=interrogate_model)
+                else:
+                    caption = interrogate_development_image(source, model=interrogate_model)
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            tags = [t.strip() for t in caption.split(",") if t.strip()]
+
+            response_headers = {
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Model": interrogate_model,
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+            }
+            return JSONResponse(
+                content={
+                    "status": "ok",
+                    "model": interrogate_model,
+                    "caption": caption,
+                    "tags": tags,
+                    "provider": config["PROVIDER_NAME"],
+                    "execution_ms": current_exec_ms,
+                },
                 headers=response_headers,
             )
 
