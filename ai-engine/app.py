@@ -681,6 +681,40 @@ DEFAULT_SCHEDULERS: list[dict[str, Any]] = [
     },
 ]
 
+# รายการ AI Upscaler มาตรฐานสำหรับขยายความละเอียดและเสริมรายละเอียดภาพ
+DEFAULT_UPSCALERS: list[dict[str, Any]] = [
+    {
+        "name": "R-ESRGAN 4x+",
+        "label": "R-ESRGAN 4x+ (Realistic & Universal)",
+        "scale": 4,
+        "description": "State of the art neural upscaler for photorealistic, cinematic, and detailed scenes.",
+    },
+    {
+        "name": "R-ESRGAN 4x+ Anime6B",
+        "label": "R-ESRGAN 4x+ Anime6B (Anime & Manga)",
+        "scale": 4,
+        "description": "Optimized specifically for anime illustrations, cel-shading, and clean line art.",
+    },
+    {
+        "name": "ESRGAN_4x",
+        "label": "ESRGAN 4x (Classic High Detail)",
+        "scale": 4,
+        "description": "Enhanced Super-Resolution GAN preserving high-frequency textures and edges.",
+    },
+    {
+        "name": "SwinIR 4x",
+        "label": "SwinIR 4x (Smooth & Denoised)",
+        "scale": 4,
+        "description": "Swin Transformer image restoration with clean geometry and minimal noise artifacts.",
+    },
+    {
+        "name": "Lanczos",
+        "label": "Lanczos (Fast Algorithmic)",
+        "scale": 1,
+        "description": "High-order sinc interpolation for fast, faithful resizing without neural hallucination.",
+    },
+]
+
 # ชุด Presets สำเร็จรูปสำหรับสไตล์และคุณภาพภาพที่นิยม
 QUALITY_PRESETS: list[dict[str, Any]] = [
     {
@@ -976,6 +1010,30 @@ def get_supported_schedulers(config: dict[str, Any]) -> list[dict[str, Any]]:
     return DEFAULT_SCHEDULERS
 
 
+# ดึงรายชื่อ AI Upscalers จาก Forge ถ้าเปิดอยู่ หรือส่งคืนรายการมาตรฐานที่เตรียมไว้
+def get_supported_upscalers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    if is_forge_provider(config):
+        try:
+            resp = forge_request(config, "GET", "/sdapi/v1/upscalers")
+            data = resp.json()
+            if isinstance(data, list) and data:
+                items = []
+                for item in data:
+                    name = item.get("name")
+                    if name:
+                        items.append({
+                            "name": name,
+                            "label": item.get("model_name") or name,
+                            "scale": item.get("scale", 4),
+                            "description": f"Forge native upscaler {name}",
+                        })
+                if items:
+                    return items
+        except Exception:
+            pass
+    return DEFAULT_UPSCALERS
+
+
 # ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler, scheduler, checkpoint, LoRA และ clip_skip
 def forge_payload(
     config: dict[str, Any],
@@ -1158,6 +1216,41 @@ def interrogate_forge_image(
         raise ProviderError(f"WebUI Forge returned invalid interrogate response: {response.text[:200]}") from exc
 
 
+# ส่งภาพไปยัง WebUI Forge เพื่อขยายความละเอียดด้วย AI Upscaler
+def upscale_forge_image(
+    config: dict[str, Any],
+    source: Image.Image,
+    scale_factor: float = 2.0,
+    upscaler: str = "R-ESRGAN 4x+",
+) -> Image.Image:
+    image = ImageOps.exif_transpose(source).convert("RGB")
+    source_buffer = io.BytesIO()
+    image.save(source_buffer, format="PNG")
+    b64_image = base64.b64encode(source_buffer.getvalue()).decode("ascii")
+
+    payload = {
+        "image": f"data:image/png;base64,{b64_image}",
+        "resize_mode": 0,
+        "upscaling_resize": float(scale_factor),
+        "upscaler_1": upscaler,
+    }
+    response = forge_request(config, "POST", "/sdapi/v1/extra-single-image", json=payload)
+    try:
+        data = response.json()
+        b64_result = data.get("image")
+        if not b64_result:
+            raise ProviderError("WebUI Forge returned empty upscale image data.")
+        if "," in b64_result:
+            b64_result = b64_result.split(",", 1)[1]
+        decoded = base64.b64decode(b64_result)
+        upscaled_image = Image.open(io.BytesIO(decoded)).convert("RGB")
+        return upscaled_image
+    except ProviderError:
+        raise
+    except Exception as exc:
+        raise ProviderError(f"Failed to decode WebUI Forge upscale response: {str(exc)[:200]}") from exc
+
+
 # สร้างชุดสีจากตัวสุ่มที่กำหนด seed สำหรับภาพทดสอบ
 def _palette(rng: random.Random) -> list[tuple[int, int, int]]:
     base = rng.randrange(360)
@@ -1333,6 +1426,25 @@ def interrogate_development_image(source: Image.Image, model: str = "deepdanboor
 
     # Default to DeepDanbooru comma-separated tags
     return ", ".join(tags)
+
+
+# ขยายขนาดภาพจำลองด้วย Pillow Lanczos พร้อมปรับปรุงความคมชัดระดับไมโครสำหรับโหมดทดสอบ
+def upscale_development_image(
+    source: Image.Image,
+    scale_factor: float = 2.0,
+    upscaler: str = "Lanczos",
+) -> Image.Image:
+    image = ImageOps.exif_transpose(source).convert("RGB")
+    new_w = max(64, int(image.width * float(scale_factor)))
+    new_h = max(64, int(image.height * float(scale_factor)))
+
+    # 1. High-order Lanczos interpolation
+    upscaled = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    # 2. Subtle micro-contrast and edge enhancement
+    sharpened = ImageEnhance.Sharpness(upscaled).enhance(1.25)
+    detailed = sharpened.filter(ImageFilter.DETAIL)
+    return detailed
 
 
 # ดึงข้อความจากข้อผิดพลาดตรวจข้อมูลของ FastAPI ให้ใช้รูปแบบเดียวกับ API
@@ -1539,6 +1651,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             "aspect_ratios": ASPECT_RATIOS,
             "presets": QUALITY_PRESETS,
             "styles": STYLE_PRESETS,
+            "upscalers": get_supported_upscalers(config),
+            "default_upscaler": config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+",
             "interrogators": [
                 {"id": "deepdanbooru", "name": "DeepDanbooru", "output_format": "tags"},
                 {"id": "clip", "name": "CLIP / BLIP", "output_format": "prose"},
@@ -1763,6 +1877,91 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     "provider": config["PROVIDER_NAME"],
                     "execution_ms": current_exec_ms,
                 },
+                headers=response_headers,
+            )
+
+    # ดึงรายชื่อ AI Upscalers ที่ระบบรองรับ
+    @app.get("/v1/upscalers", tags=["images", "upscale"], dependencies=[private_api])
+    def upscalers():
+        items = get_supported_upscalers(config)
+        default_upscaler = config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+"
+        return {
+            "upscalers": items,
+            "count": len(items),
+            "default": default_upscaler,
+            "supported_scales": [1.5, 2.0, 3.0, 4.0],
+        }
+
+    # ขยายความละเอียดและเพิ่มรายละเอียดภาพด้วย AI Upscaler (High-Res Fix / Super Resolution)
+    @app.post("/v1/upscale", tags=["images", "upscale"], dependencies=[private_api])
+    def upscale(
+        image: Annotated[UploadFile, File(description="Source image to upscale")],
+        scale_factor: Annotated[str, Form(alias="scale_factor")] = "2.0",
+        upscaler: Annotated[str | None, Form()] = None,
+    ):
+        if not image.filename:
+            raise ApiError("validation_error", "An image file is required.", 400)
+        try:
+            scale = float(scale_factor)
+            if not 1.0 <= scale <= 4.0:
+                raise ValueError("Scale factor must be between 1.0 and 4.0.")
+            image.file.seek(0, io.SEEK_END)
+            if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
+                raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
+            image.file.seek(0)
+            source = Image.open(image.file)
+            source.verify()
+            image.file.seek(0)
+            source = Image.open(image.file)
+            if source.width * source.height > MAX_DIMENSION * MAX_DIMENSION * 4:
+                raise ValueError("The input image has too many pixels.")
+            if source.width * scale > 4096 or source.height * scale > 4096:
+                raise ValueError(f"Upscaling by {scale}x would exceed maximum allowable dimensions (4096px).")
+        except ApiError:
+            raise
+        except (ValueError, UnidentifiedImageError) as exc:
+            raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
+
+        effective_upscaler = (upscaler or config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+").strip()
+
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    result = upscale_forge_image(
+                        config,
+                        source,
+                        scale_factor=scale,
+                        upscaler=effective_upscaler,
+                    )
+                else:
+                    result = upscale_development_image(
+                        source,
+                        scale_factor=scale,
+                        upscaler=effective_upscaler,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG", optimize=True)
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="luma-upscale-{result.width}x{result.height}.png"',
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Upscaler": effective_upscaler,
+                "X-LUMA-Scale": str(scale),
+                "X-LUMA-Width": str(result.width),
+                "X-LUMA-Height": str(result.height),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
                 headers=response_headers,
             )
 
