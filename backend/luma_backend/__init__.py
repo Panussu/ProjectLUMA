@@ -18,6 +18,7 @@ from .config import Config, validate_runtime_config
 from .extensions import db
 from .jobs import jobs_blueprint, media_blueprint
 from .prompts import prompts_blueprint
+from .filters import filters_blueprint
 from .worker import recover_jobs_on_startup
 
 jwt = JWTManager()
@@ -60,6 +61,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app.register_blueprint(jobs_blueprint, url_prefix="/api/v1/jobs")
     app.register_blueprint(ai_blueprint, url_prefix="/api/v1/ai")
     app.register_blueprint(prompts_blueprint, url_prefix="/api/v1/prompts")
+    app.register_blueprint(filters_blueprint, url_prefix="/api/v1")
     app.register_blueprint(media_blueprint, url_prefix="/media")
 
     with app.app_context():
