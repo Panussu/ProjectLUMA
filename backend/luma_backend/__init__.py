@@ -60,6 +60,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app.register_blueprint(auth_blueprint, url_prefix="/api/v1/auth")
     app.register_blueprint(jobs_blueprint, url_prefix="/api/v1/jobs")
     app.register_blueprint(ai_blueprint, url_prefix="/api/v1/ai")
+    app.register_blueprint(ai_blueprint, url_prefix="/api/v1", name="ai_direct")
     app.register_blueprint(prompts_blueprint, url_prefix="/api/v1/prompts")
     app.register_blueprint(filters_blueprint, url_prefix="/api/v1")
     app.register_blueprint(media_blueprint, url_prefix="/media")

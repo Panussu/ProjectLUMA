@@ -193,3 +193,10 @@ def test_catalog_routes_match_engine(backend_client, registered_user, monkeypatc
     response = backend_client.get(f"/api/v1/ai/{backend_path}", headers=auth(registered_user["token"]))
     assert response.status_code == 200
     assert calls == [f"http://ai.test/v1/{engine_path}"]
+
+    # ตรวจสอบว่าเรียกผ่าน /api/v1/<path> ตรง ๆ โดยไม่มี /ai/ ก็ใช้งานได้เช่นกัน
+    calls.clear()
+    direct_response = backend_client.get(f"/api/v1/{backend_path}", headers=auth(registered_user["token"]))
+    assert direct_response.status_code == 200
+    assert calls == [f"http://ai.test/v1/{engine_path}"]
+
