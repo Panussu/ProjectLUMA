@@ -6,6 +6,8 @@ import json
 import re
 import secrets
 import uuid
+from datetime import datetime, timezone
+import requests
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, send_from_directory
@@ -259,6 +261,35 @@ def get_job(job_id: str):
     if job is None:
         return error_response("job_not_found", "The requested job does not exist.", 404)
     return jsonify({"job": serialized(job)})
+
+
+# ขอยกเลิกงานและส่งสัญญาณหยุด GPU หากงานกำลังประมวลผลอยู่
+@jobs_blueprint.post("/<job_id>/cancel")
+@jwt_required()
+def cancel_job(job_id: str):
+    job = db.session.scalar(db.select(Job).where(Job.id == job_id, Job.user_id == current_user_id()))
+    if job is None:
+        return error_response("job_not_found", "The requested job does not exist.", 404)
+
+    if job.status in ("completed", "failed", "cancelled"):
+        return error_response("invalid_job_state", f"Cannot cancel a job that is already {job.status}.", 409)
+
+    previous_status = job.status
+    job.status = "cancelled"
+    job.error = "Job was cancelled by the user."
+    job.completed_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    # หากงานกำลังทำงานบน GPU ให้ส่งคำขอ interrupt ไปยัง AI Engine เพื่อคืน VRAM ทันที
+    if previous_status == "processing":
+        ai_url = f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}/v1/interrupt"
+        headers = {"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]}
+        try:
+            requests.post(ai_url, headers=headers, timeout=(2, 5), allow_redirects=False)
+        except requests.RequestException:
+            current_app.logger.warning("Failed to forward interrupt signal to AI service for job %s", job_id)
+
+    return jsonify({"job": serialized(job), "message": "Job cancelled successfully."}), 200
 
 
 # ตรวจสิทธิ์เข้าถึงภาพก่อนอ่านไฟล์จากพื้นที่จัดเก็บของ Backend

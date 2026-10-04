@@ -110,36 +110,57 @@ def process_job(app: Flask, job_id: str) -> None:
             headers = {"X-LUMA-Service-Token": app.config["AI_SERVICE_TOKEN"]}
             timeout = (app.config["AI_CONNECT_TIMEOUT"], app.config["AI_READ_TIMEOUT"])
             base_url = app.config["AI_SERVICE_URL"].rstrip("/")
+            max_queue_retries = int(app.config.get("AI_QUEUE_MAX_RETRIES", 3))
+            retry_delay = float(app.config.get("AI_QUEUE_RETRY_DELAY", 1.0))
+            response = None
 
             # งานสร้างภาพส่ง JSON ส่วนงานแก้ไขส่งไฟล์พร้อมข้อมูลฟอร์ม
 
-            if job.type == "generate":
-                payload = {
-                    "prompt": job.prompt,
-                    "negative_prompt": job.negative_prompt,
-                    "width": job.width,
-                    "height": job.height,
-                    "steps": job.steps,
-                    "seed": job.seed,
-                }
-                if job.ai_options:
-                    payload.update(job.ai_options.request_options)
-                response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers, timeout=timeout, allow_redirects=False)
-            else:
-                source_to_remove = Path(app.config["UPLOAD_ROOT"]) / str(job.source_filename)
-                form = {"prompt": job.prompt, "strength": str(job.strength), "seed": str(job.seed)}
-                if job.ai_options:
-                    for key, value in job.ai_options.request_options.items():
-                        form[key] = json.dumps(value) if key == "loras" else str(value)
-                with source_to_remove.open("rb") as source:
-                    response = requests.post(
-                        f"{base_url}/v1/edit",
-                        data=form,
-                        files={"image": (source_to_remove.name, source, "application/octet-stream")},
-                        headers=headers,
-                        timeout=timeout,
-                        allow_redirects=False,
+            for attempt in range(max_queue_retries + 1):
+                if db.session.scalar(db.select(Job.status).where(Job.id == job_id)) == "cancelled":
+                    logger.info("Job %s was cancelled by user; aborting processing", job_id)
+                    return
+
+                if job.type == "generate":
+                    payload = {
+                        "prompt": job.prompt,
+                        "negative_prompt": job.negative_prompt,
+                        "width": job.width,
+                        "height": job.height,
+                        "steps": job.steps,
+                        "seed": job.seed,
+                    }
+                    if job.ai_options:
+                        payload.update(job.ai_options.request_options)
+                    response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers, timeout=timeout, allow_redirects=False)
+                else:
+                    source_to_remove = Path(app.config["UPLOAD_ROOT"]) / str(job.source_filename)
+                    form = {"prompt": job.prompt, "strength": str(job.strength), "seed": str(job.seed)}
+                    if job.ai_options:
+                        for key, value in job.ai_options.request_options.items():
+                            form[key] = json.dumps(value) if key == "loras" else str(value)
+                    with source_to_remove.open("rb") as source:
+                        response = requests.post(
+                            f"{base_url}/v1/edit",
+                            data=form,
+                            files={"image": (source_to_remove.name, source, "application/octet-stream")},
+                            headers=headers,
+                            timeout=timeout,
+                            allow_redirects=False,
+                        )
+
+                if response.status_code == 429 and attempt < max_queue_retries:
+                    backoff = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        "AI queue full (HTTP 429) for job %s, retrying in %.1fs (attempt %d/%d)",
+                        job_id,
+                        backoff,
+                        attempt + 1,
+                        max_queue_retries,
                     )
+                    time.sleep(backoff)
+                    continue
+                break
 
             # แปลง HTTP error ของบริการปลายทางเป็นข้อผิดพลาดของงาน
 
@@ -199,9 +220,25 @@ def process_job(app: Flask, job_id: str) -> None:
                             result_options["cfg_scale"] = value
                     except ValueError:
                         logger.warning("Ignoring invalid CFG scale header for job %s", job_id)
+                for field, header in (
+                    ("queue_wait_ms", "X-LUMA-Queue-Wait-Ms"),
+                    ("execution_ms", "X-LUMA-Execution-Ms"),
+                    ("queue_remaining", "X-LUMA-Queue-Remaining"),
+                ):
+                    if response.headers.get(header):
+                        try:
+                            result_options[field] = float(response.headers[header])
+                        except ValueError:
+                            pass
                 job.ai_options.result_options = result_options
                 if "steps" in result_options:
                     job.steps = result_options["steps"]
+
+            # ตรวจสอบว่างานถูกยกเลิกไปแล้วหรือไม่ ก่อนจะเขียนทับด้วย completed
+            if db.session.scalar(db.select(Job.status).where(Job.id == job_id)) == "cancelled":
+                logger.info("Job %s was cancelled before completion could be saved", job_id)
+                return
+
             # บันทึกสถานะสำเร็จและเวลาเมื่อจัดเก็บผลลัพธ์แล้ว
             job.status = "completed"
             job.progress = 100
@@ -214,7 +251,7 @@ def process_job(app: Flask, job_id: str) -> None:
             logger.exception("Job %s failed after %.2f seconds", job_id, time.perf_counter() - started_at)
             db.session.rollback()
             failed_job = db.session.get(Job, job_id)
-            if failed_job:
+            if failed_job and failed_job.status != "cancelled":
                 failed_job.status = "failed"
                 if isinstance(exc, requests.Timeout):
                     failed_job.error = "The AI service timed out before completing the job."
