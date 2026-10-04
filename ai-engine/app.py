@@ -1447,6 +1447,38 @@ def upscale_development_image(
     return detailed
 
 
+# ==================== Image Filter & Preprocessing Algorithms (API Workshop) ====================
+FILTER_OPERATIONS = {"grayscale", "edge", "blur", "invert"}
+ALLOWED_FILTER_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+# ประมวลผลภาพตาม operation ที่เลือก (Grayscale, Edge Detection, Blur, Invert)
+def process_filter_image(image: Image.Image, operation: str) -> Image.Image:
+    """ประมวลผลภาพตาม operation ที่เลือก แล้วคืน Pillow Image โหมด RGB (API_Workshop compatible)."""
+    # ทำให้ทุก operation รับข้อมูลสีสาม channel เหมือนกัน
+    rgb_image = image.convert("RGB")
+
+    # Algorithm 1: Grayscale - Luminance Weighted Sum Algorithm (ITU-R BT.601)
+    # Y = 0.299*R + 0.587*G + 0.114*B
+    if operation == "grayscale":
+        return ImageOps.grayscale(rgb_image).convert("RGB")
+
+    # Algorithm: Gaussian Blur - 2D Gaussian Spatial Kernel Convolution Filter
+    if operation == "blur":
+        return rgb_image.filter(ImageFilter.GaussianBlur(radius=4))
+
+    # Algorithm 2: Edge Detection - 2D Spatial Convolution Filter (Laplacian / FIND_EDGES)
+    # ใช้ 3x3 convolution kernel หาความชัน (gradient magnitude) ของขอบภาพ
+    if operation == "edge":
+        return rgb_image.filter(ImageFilter.FIND_EDGES)
+
+    # Algorithm: Invert - Arithmetic Channel Inversion (255 - x)
+    if operation == "invert":
+        return ImageOps.invert(rgb_image)
+
+    raise ValueError(f"Unsupported operation: {operation}")
+
+
 # ดึงข้อความจากข้อผิดพลาดตรวจข้อมูลของ FastAPI ให้ใช้รูปแบบเดียวกับ API
 def validation_message(error: RequestValidationError) -> str:
     if not error.errors():
@@ -2085,6 +2117,101 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 headers=response_headers,
             )
 
+    # ดึงรายชื่อ Filter และ Image Processing Operations ที่ระบบรองรับ (API_Workshop compatible)
+    @app.get("/v1/filters", tags=["images", "filters"])
+    @app.get("/filters", tags=["images", "filters"])
+    def get_supported_filters():
+        return {
+            "operations": [
+                {
+                    "id": "grayscale",
+                    "name": "Grayscale",
+                    "algorithm": "Luminance Weighted Sum (ITU-R BT.601: 0.299R + 0.587G + 0.114B)",
+                    "description": "Convert RGB to monochrome luminance channel.",
+                },
+                {
+                    "id": "edge",
+                    "name": "Edge Detection",
+                    "algorithm": "Spatial 2D Convolution Kernel Filter (Laplacian / FIND_EDGES)",
+                    "description": "Detect high-gradient boundaries and contours for ControlNet lineart.",
+                },
+                {
+                    "id": "blur",
+                    "name": "Gaussian Blur",
+                    "algorithm": "2D Gaussian Kernel Smoothing (radius=4)",
+                    "description": "Low-pass spatial filter for noise reduction and smoothing.",
+                },
+                {
+                    "id": "invert",
+                    "name": "Color Inversion",
+                    "algorithm": "Arithmetic Channel Inversion (255 - X)",
+                    "description": "Negative color transformation.",
+                },
+            ],
+            "default": "grayscale",
+        }
+
+    # ประมวลผลภาพ (Grayscale, Edge Detection, Blur, Invert) ตามมาตรฐาน API_Workshop
+    @app.post(
+        "/process",
+        tags=["images", "filters"],
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    @app.post(
+        "/v1/process",
+        tags=["images", "filters"],
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    async def process_image_endpoint(
+        file: UploadFile = File(description="Source image file (JPEG, PNG, WebP)"),
+        operation: Annotated[str, Form(description="Operation: grayscale, edge, blur, invert")] = "grayscale",
+    ) -> Response:
+        """ตรวจสอบไฟล์ ใช้ operation ที่ร้องขอ และตอบกลับเป็นภาพ PNG (API_Workshop compatible)."""
+        # ตรวจ MIME type เบื้องต้น
+        if file.content_type and file.content_type not in ALLOWED_FILTER_CONTENT_TYPES:
+            raise ApiError("unsupported_media_type", "รองรับเฉพาะไฟล์ JPEG, PNG และ WebP", 415)
+
+        op = str(operation or "grayscale").strip().lower()
+        if op not in FILTER_OPERATIONS:
+            raise ApiError(
+                "validation_error",
+                f"ไม่รู้จักรูปแบบการประมวลผล '{op}'. รองรับเฉพาะ: {', '.join(sorted(FILTER_OPERATIONS))}",
+                400,
+            )
+
+        max_size = int(config.get("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))
+        file_bytes = await file.read(max_size + 1)
+        await file.close()
+
+        if not file_bytes:
+            raise ApiError("validation_error", "ไฟล์ภาพว่างเปล่า", 400)
+        if len(file_bytes) > max_size:
+            raise ApiError("request_too_large", "ไฟล์ภาพต้องมีขนาดไม่เกิน 10 MB", 413)
+
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as source_image:
+                source_image.load()
+                result_image = process_filter_image(source_image, op)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ApiError("validation_error", f"ไม่สามารถอ่านหรือประมวลผลภาพนี้ได้: {exc}", 400) from exc
+
+        output = io.BytesIO()
+        result_image.save(output, format="PNG")
+        output_bytes = output.getvalue()
+
+        return Response(
+            content=output_bytes,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'inline; filename="processed-{op}.png"',
+                "X-Image-Operation": op,
+                "X-LUMA-Operation": op,
+                "X-LUMA-Width": str(result_image.width),
+                "X-LUMA-Height": str(result_image.height),
+            },
+        )
 
     return app
 
