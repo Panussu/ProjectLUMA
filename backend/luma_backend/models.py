@@ -21,6 +21,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now)
     jobs = db.relationship("Job", back_populates="user", cascade="all, delete-orphan")
+    favorite_prompts = db.relationship("FavoritePrompt", back_populates="user", cascade="all, delete-orphan")
 
     # เก็บแฮชของรหัสผ่านแทนการเก็บรหัสผ่านต้นฉบับ
     def set_password(self, password: str) -> None:
@@ -93,4 +94,30 @@ class JobAIOptions(db.Model):
     request_options = db.Column(db.JSON, nullable=False, default=dict)
     result_options = db.Column(db.JSON, nullable=False, default=dict)
     job = db.relationship("Job", back_populates="ai_options")
+
+
+# ตารางเก็บ Prompt ที่ผู้ใช้บันทึกเป็นรายการโปรด (Bookmark / Favorites)
+class FavoritePrompt(db.Model):
+    __tablename__ = "favorite_prompts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    title = db.Column(db.String(100), nullable=False)
+    prompt = db.Column(db.Text, nullable=False)
+    negative_prompt = db.Column(db.Text, nullable=False, default="")
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, index=True)
+
+    user = db.relationship("User", back_populates="favorite_prompts")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "prompt": self.prompt,
+            "negative_prompt": self.negative_prompt,
+            "tags": self.tags if isinstance(self.tags, list) else [],
+            "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
+        }
 
