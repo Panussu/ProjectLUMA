@@ -1,0 +1,161 @@
+/* ========================
+   ส่วนแนะนำ ปุ่มหลัก และแผนผังลำดับบริการ
+   ======================== */
+.hero-section {
+  min-height: 100vh;
+  padding: 160px 0 90px;
+}
+
+.eyebrow {
+  color: #b4a0ff;
+  font-size: .77rem;
+  font-weight: 700;
+  letter-spacing: .18em;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+}
+
+.hero-copy {
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1.7;
+  margin: 2rem 0;
+  max-width: 660px;
+}
+
+.btn {
+  border-radius: 12px;
+  font-weight: 600;
+  padding: .72rem 1.1rem;
+}
+
+.btn-primary {
+  background: linear-gradient(110deg, #7c3aed, #c026d3);
+  border: 0;
+  box-shadow: 0 10px 30px rgba(124, 58, 237, .25);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(110deg, #8b5cf6, #db2777);
+  transform: translateY(-1px);
+}
+
+.architecture-strip {
+  align-items: center;
+  color: #858594;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: .78rem;
+  gap: .6rem;
+  margin-top: 3rem;
+  text-transform: uppercase;
+}
+
+.architecture-strip i {
+  background: #555565;
+  height: 1px;
+  position: relative;
+  width: 22px;
+}
+
+.architecture-strip i::after {
+  border-right: 1px solid #777789;
+  border-top: 1px solid #777789;
+  content: "";
+  height: 5px;
+  position: absolute;
+  right: 0;
+  top: -2px;
+  transform: rotate(45deg);
+  width: 5px;
+}
+
+/* จัดรูปทรงและแสงของภาพประกอบหน้าแรกด้วย CSS */
+.hero-art {
+  aspect-ratio: 1 / 1.12;
+  background: linear-gradient(145deg, rgba(139, 92, 246, .17), rgba(34, 211, 238, .05));
+  border: 1px solid var(--line);
+  border-radius: 34px;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .4);
+  overflow: hidden;
+  position: relative;
+}
+
+.art-grid {
+  background-image: linear-gradient(rgba(255, 255, 255, .06) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .06) 1px, transparent 1px);
+  background-size: 44px 44px;
+  inset: 0;
+  mask-image: linear-gradient(to bottom, black, transparent);
+  position: absolute;
+}
+
+.orb {
+  border-radius: 45% 55% 65% 35%;
+  filter: saturate(1.2);
+  position: absolute;
+}
+
+.orb-a {
+  background: radial-gradient(circle at 35% 30%, #e9d5ff, #7c3aed 45%, #172554);
+  height: 56%;
+  left: 16%;
+  top: 14%;
+  transform: rotate(-18deg);
+  width: 55%;
+}
+
+.orb-b {
+  background: radial-gradient(circle at 30% 20%, #fbcfe8, #db2777 50%, #4c1d95);
+  height: 36%;
+  right: 10%;
+  top: 35%;
+  transform: rotate(28deg);
+  width: 38%;
+}
+
+.orb-c {
+  background: radial-gradient(circle at 50% 30%, #cffafe, #0891b2 50%, #1e1b4b);
+  bottom: 9%;
+  height: 34%;
+  left: 22%;
+  transform: rotate(10deg);
+  width: 42%;
+}
+
+.prompt-card {
+  align-items: flex-start;
+  backdrop-filter: blur(18px);
+  background: rgba(9, 9, 17, .72);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 18px;
+  bottom: 7%;
+  display: flex;
+  gap: 1rem;
+  left: 7%;
+  padding: 1rem 1.2rem;
+  position: absolute;
+  right: 7%;
+}
+
+.prompt-card .spark {
+  color: #d8b4fe;
+  font-size: 1.5rem;
+}
+
+.prompt-card small {
+  color: #8f8f9d;
+  text-transform: uppercase;
+}
+
+.prompt-card p {
+  font-size: .92rem;
+  margin: .2rem 0 0;
+}
+
+.art-label {
+  font: 600 .67rem "Manrope";
+  letter-spacing: .2em;
+  position: absolute;
+  right: 8%;
+  top: 6%;
+}

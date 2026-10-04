@@ -1,0 +1,102 @@
+/* ========================
+   ปรับแถบนำทางและพื้นที่ทำงานสำหรับแท็บเล็ตหรือจอแคบ
+   ======================== */
+@media (max-width: 991px) {
+  .navbar-collapse {
+    background: #111119;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    margin-top: 1rem;
+    padding: 1rem;
+  }
+
+  .hero-section {
+    padding-top: 130px;
+  }
+
+  .hero-art {
+    margin: auto;
+    max-width: 570px;
+  }
+
+  .control-panel {
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .result-panel,
+  .empty-result,
+  .job-progress,
+  .result-view {
+    min-height: 520px;
+  }
+}
+
+/* ลดระยะและขนาดพื้นที่แสดงผลให้เหมาะกับโทรศัพท์ */
+@media (max-width: 575px) {
+  h1 {
+    font-size: 3.3rem;
+  }
+
+  .hero-section {
+    padding-bottom: 60px;
+  }
+
+  .studio-section,
+  .gallery-section {
+    padding: 75px 0;
+  }
+
+  .control-panel {
+    padding: 1.3rem;
+  }
+
+  .studio-tabs {
+    padding: 0 .5rem;
+  }
+
+  .result-panel,
+  .empty-result,
+  .job-progress,
+  .result-view {
+    min-height: 420px;
+  }
+
+  .architecture-strip {
+    display: none;
+  }
+
+  .lora-row {
+    grid-template-columns: auto auto minmax(70px, 1fr) 42px 2rem;
+  }
+
+  .trained-words {
+    display: none;
+  }
+
+  .style-gallery {
+    grid-auto-columns: minmax(120px, .8fr);
+  }
+
+  .progress-details {
+    width: 92%;
+  }
+
+  .live-preview {
+    max-width: 90%;
+  }
+}
+
+/* ลดแอนิเมชันตามการตั้งค่าการเข้าถึงของผู้ใช้ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
