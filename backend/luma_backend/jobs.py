@@ -292,6 +292,75 @@ def cancel_job(job_id: str):
     return jsonify({"job": serialized(job), "message": "Job cancelled successfully."}), 200
 
 
+# อ่านสถานะความคืบหน้ารวมแบบเรียลไทม์จาก AI Engine
+@jobs_blueprint.get("/progress")
+@jwt_required()
+def overall_progress():
+    include_preview = request.args.get("include_preview", "false").strip().lower() in ("1", "true", "yes")
+    ai_url = f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}/v1/progress"
+    headers = {"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]}
+    timeout = (current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_METADATA_TIMEOUT"])
+    try:
+        resp = requests.get(
+            ai_url,
+            params={"include_preview": "true" if include_preview else "false"},
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if resp.status_code == 200:
+            return jsonify(resp.json()), 200
+        return jsonify({"active": False, "progress": 0.0, "progress_percent": 0.0, "status": "ai_error"}), 200
+    except requests.RequestException:
+        return jsonify({"active": False, "progress": 0.0, "progress_percent": 0.0, "status": "ai_unavailable"}), 200
+
+
+# อ่านความคืบหน้ารายงานพร้อมพรีวิวแบบเรียลไทม์
+@jobs_blueprint.get("/<job_id>/progress")
+@jwt_required()
+def job_progress(job_id: str):
+    job = db.session.scalar(db.select(Job).where(Job.id == job_id, Job.user_id == current_user_id()))
+    if job is None:
+        return error_response("job_not_found", "The requested job does not exist.", 404)
+
+    if job.status != "processing":
+        return jsonify({
+            "job_id": job.id,
+            "status": job.status,
+            "active": False,
+            "progress": job.progress / 100.0,
+            "progress_percent": float(job.progress),
+        }), 200
+
+    include_preview = request.args.get("include_preview", "false").strip().lower() in ("1", "true", "yes")
+    ai_url = f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}/v1/progress"
+    headers = {"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]}
+    timeout = (current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_METADATA_TIMEOUT"])
+    try:
+        resp = requests.get(
+            ai_url,
+            params={"include_preview": "true" if include_preview else "false"},
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            data["job_id"] = job.id
+            data["status"] = job.status
+            return jsonify(data), 200
+    except requests.RequestException:
+        pass
+
+    return jsonify({
+        "job_id": job.id,
+        "status": job.status,
+        "active": True,
+        "progress": 0.15,
+        "progress_percent": 15.0,
+    }), 200
+
+
 # ตรวจสิทธิ์เข้าถึงภาพก่อนอ่านไฟล์จากพื้นที่จัดเก็บของ Backend
 @media_blueprint.get("/<path:filename>")
 def media(filename: str):
