@@ -23,6 +23,9 @@ class User(db.Model):
     jobs = db.relationship("Job", back_populates="user", cascade="all, delete-orphan")
     favorite_prompts = db.relationship("FavoritePrompt", back_populates="user", cascade="all, delete-orphan")
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     # เก็บแฮชของรหัสผ่านแทนการเก็บรหัสผ่านต้นฉบับ
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -62,6 +65,9 @@ class Job(db.Model):
     user = db.relationship("User", back_populates="jobs")
     ai_options = db.relationship("JobAIOptions", back_populates="job", uselist=False, cascade="all, delete-orphan")
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     # เลือกข้อมูลที่เปิดเผยผ่าน API และแปลงเวลาเป็นข้อความสำหรับ JSON
     def to_dict(self, result_url: str | None = None) -> dict:
         return {
@@ -95,6 +101,9 @@ class JobAIOptions(db.Model):
     result_options = db.Column(db.JSON, nullable=False, default=dict)
     job = db.relationship("Job", back_populates="ai_options")
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
 
 # ตารางเก็บ Prompt ที่ผู้ใช้บันทึกเป็นรายการโปรด (Bookmark / Favorites)
 class FavoritePrompt(db.Model):
@@ -109,6 +118,9 @@ class FavoritePrompt(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, index=True)
 
     user = db.relationship("User", back_populates="favorite_prompts")
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def to_dict(self) -> dict:
         return {
