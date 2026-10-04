@@ -55,6 +55,37 @@ Copy-Item .env.vlan.example .env
 
 สถานะงานยังอ่านจาก `GET /api/v1/jobs/<job_id>` ค่า `progress` ของ Backend แสดงช่วง queued, processing และ completed เท่านั้น เนื่องจาก `/v1/progress` ของ AiEngine เป็นสถานะรวมของ GPU และไม่มี job ID จึงไม่สามารถผูกเปอร์เซ็นต์หรือภาพระหว่างทางกับงานของผู้ใช้แต่ละคนได้อย่างปลอดภัย
 
+## ระบบ Bookmark & Favorite Prompts (Addon Feature - Backend)
+
+Backend รองรับการบันทึก Bookmark และจัดเก็บ Prompt ที่ชื่นชอบแยกตามรายบัญชีผู้ใช้ (`user_id`) อย่างสมบูรณ์:
+
+- **บันทึก Bookmark ใหม่ หรือกด Bookmark จากผลงานเดิม**:
+  - `POST /api/v1/prompts/favorites`
+  - รองรับการระบุ `title`, `prompt`, `negative_prompt`, `model`, `tags` (JSON array หรือ comma-separated string)
+  - รองรับการส่ง `job_id` เพื่อดึง prompt และพารามิเตอร์การสร้างจาก Job นั้นมา Bookmark ได้ทันทีในคลิกเดียว (Star ⭐ button)
+- **ค้นหาและเรียกดู Bookmark**:
+  - `GET /api/v1/prompts/favorites`: ดูรายการ Bookmark ทั้งหมดของผู้ใช้ รองรับการค้นหา `?q=keywords` และการกรองแท็ก `?tag=anime`
+  - `GET /api/v1/prompts/favorites/<favorite_id>`: ดูรายละเอียด Bookmark เฉพาะรายการ
+- **แก้ไขและลบ Bookmark**:
+  - `PUT /api/v1/prompts/favorites/<favorite_id>`: แก้ไขชื่อ หัวข้อ แท็ก หรือ prompt
+  - `DELETE /api/v1/prompts/favorites/<favorite_id>`: ลบ Bookmark
+
+## ฟีเจอร์เพิ่มเติมสำหรับเชื่อมต่อกับระบบ LUMA
+
+1. **Job Cancellation & GPU Interrupt**:
+   - `POST /api/v1/jobs/<job_id>/cancel`: ยกเลิกงานที่กำลังประมวลผล พร้อมส่งสัญญาณ `POST /v1/interrupt` ไปยัง AiEngine เพื่อหยุด GPU ทันที
+   - รองรับการ retry อัตโนมัติเมื่อ AiEngine ส่ง HTTP 429 (`queue_full`) พร้อมบันทึก Telemetry headers
+2. **Live Progress Tracking & Denoising Preview**:
+   - `GET /api/v1/jobs/progress` และ `GET /api/v1/jobs/<job_id>/progress`: ดึงสถานะเปอร์เซ็นต์และพรีวิว denoising (`?include_preview=true`)
+3. **Image Filters & Super-Resolution Upscaling**:
+   - `GET /api/v1/filters`: รายการฟิลเตอร์ประมวลผลภาพ (Grayscale, Edge Detection, Gaussian Blur, Invert, Sharpen)
+   - `POST /api/v1/process`: ใส่ฟิลเตอร์ลงบนภาพผลลัพธ์
+   - `GET /api/v1/upscalers`: รายการอัลกอริทึม Upscaler (Lanczos 2x, 4x)
+   - `POST /api/v1/upscale`: ขยายความละเอียดภาพ
+4. **Image-to-Prompt Interrogator**:
+   - `GET /api/v1/interrogate/models`: รายการโมเดลวิเคราะห์ภาพ (DeepDanbooru, CLIP)
+   - `POST /api/v1/interrogate`: ส่งภาพเพื่อถอดเป็น Prompt/Tags สำหรับสร้างภาพต่อ
+
 ## ความสามารถเพิ่มเติมในสาขา Backend
 
 ดาวน์โหลดภาพได้ด้วยลิงก์ที่มีลายเซ็นและอายุจำกัด หรือส่วนหัว `Authorization: Bearer <token>` ของเจ้าของภาพ โทเคนของบัญชีอื่นไม่ได้ให้สิทธิ์อ่านภาพนั้น
