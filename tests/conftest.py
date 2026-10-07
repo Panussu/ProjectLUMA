@@ -1,13 +1,52 @@
 # fixture ร่วมของ pytest ใช้ข้อมูลชั่วคราวแทนฐานข้อมูลผู้ใช้จริง
 from __future__ import annotations
 
+import importlib.util
 import io
+import sys
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
 from luma_backend import create_app
 from luma_backend.extensions import db
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+AI_APP_PATH = REPOSITORY_ROOT / "ai-engine" / "app.py"
+
+
+# โหลดโมดูล AI จากเส้นทางไฟล์เพื่อแยกการสร้างแอปทดสอบ
+def load_ai_module():
+    spec = importlib.util.spec_from_file_location("luma_ai_app", AI_APP_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+# จัดเตรียมโมดูล AI ให้แต่ละกรณีทดสอบ
+@pytest.fixture()
+def ai_module():
+    return load_ai_module()
+
+
+# สร้างแอป AI สำหรับทดสอบด้วยโทเคนที่กำหนดไว้ใน fixture
+@pytest.fixture()
+def ai_app(ai_module):
+    return ai_module.create_app({
+        "TESTING": True,
+        "SERVICE_TOKEN": "test-service-token",
+        "AI_PROVIDER": "development-procedural"
+    })
+
+
+# เปิด test client ของ FastAPI และปิดเมื่อจบกรณีทดสอบ
+@pytest.fixture()
+def ai_client(ai_app):
+    with TestClient(ai_app) as client:
+        yield client
 
 
 # ใช้ฐานข้อมูลและโฟลเดอร์ชั่วคราวสำหรับทดสอบ แล้วล้าง session และตารางเมื่อจบ
