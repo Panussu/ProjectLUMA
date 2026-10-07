@@ -1,0 +1,91 @@
+/* ========================
+   แถบนำทาง โลโก้ และปุ่มบัญชีผู้ใช้
+   ======================== */
+.navbar {
+  backdrop-filter: blur(18px);
+  background: rgba(11, 11, 18, .72);
+  border-bottom: 1px solid transparent;
+  padding: 1rem 0;
+}
+
+.navbar-brand {
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.brand-mark {
+  border: 2px solid white;
+  border-radius: 50%;
+  display: grid;
+  height: 28px;
+  place-items: center;
+  transform: rotate(45deg);
+  width: 28px;
+}
+
+.brand-mark span {
+  background: linear-gradient(135deg, var(--violet), var(--pink));
+  border-radius: 50% 50% 10% 50%;
+  height: 14px;
+  width: 14px;
+}
+
+.nav-link {
+  color: #ceced8;
+}
+
+.nav-link:hover {
+  color: white;
+}
+
+.btn-ghost {
+  color: #c9c9d4;
+}
+
+/* สีและจุดแสดงสถานะพร้อมใช้งานหรือขาดการเชื่อมต่อ */
+.health-badge {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  display: inline-flex;
+  font-size: .78rem;
+  gap: .45rem;
+  margin: .5rem 0;
+  padding: .35rem .7rem;
+}
+
+.health-dot {
+  background: #fbbf24;
+  border-radius: 50%;
+  height: 7px;
+  width: 7px;
+}
+
+.health-badge.ok .health-dot {
+  background: #34d399;
+  box-shadow: 0 0 10px #34d399;
+}
+
+.health-badge.offline .health-dot {
+  background: #fb7185;
+}
+
+.health-badge.busy .health-dot {
+  background: #60a5fa;
+  box-shadow: 0 0 10px #60a5fa;
+}
+
+.health-badge.busy {
+  color: #bfdbfe;
+}
+
+.user-menu {
+  align-items: center;
+  display: flex;
+  gap: .4rem;
+}
+
+.btn-link.nav-link {
+  border: 0;
+  text-decoration: none;
+}

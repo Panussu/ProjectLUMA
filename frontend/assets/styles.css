@@ -1,0 +1,29 @@
+﻿/* ============================================================
+   Project LUMA - Main Stylesheet
+   ไฟล์นี้เป็นจุดรวม ดึงสไตล์ย่อยเข้ามาด้วย @import
+   ลำดับของ @import สำคัญ: ต้องขึ้นก่อน rule อื่น ๆ เสมอ
+   ============================================================ */
+
+/* 1. ตัวแปร CSS, Reset, Body, Typography */
+@import url('./css/_variables.css');
+
+/* 2. แถบนำทาง, Brand, Health Badge */
+@import url('./css/_navbar.css');
+
+/* 3. Hero Section, Orbs, Prompt Card */
+@import url('./css/_hero.css');
+
+/* 4. Studio Section, Forms, Upload, LoRA, Tags, Presets */
+@import url('./css/_studio.css');
+
+/* 5. Result Panel, Progress, Auth, Lightbox */
+@import url('./css/_result.css');
+
+/* 6. Gallery Cards, Status Pills */
+@import url('./css/_gallery.css');
+
+/* 7. Footer */
+@import url('./css/_footer.css');
+
+/* 8. Responsive Breakpoints and Accessibility */
+@import url('./css/_responsive.css');

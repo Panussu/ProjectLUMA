@@ -1,0 +1,233 @@
+/* ========================
+   พื้นที่รอผล แถบความคืบหน้า และภาพพร้อมปุ่มดาวน์โหลด
+   ======================== */
+.result-panel {
+  min-height: 600px;
+  position: relative;
+}
+
+.empty-result,
+.job-progress {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: center;
+  min-height: 600px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.empty-icon {
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: #a78bfa;
+  display: grid;
+  font-size: 2rem;
+  height: 84px;
+  margin-bottom: 1.3rem;
+  place-items: center;
+  width: 84px;
+}
+
+.empty-result p,
+.job-progress small {
+  color: var(--muted);
+}
+
+/* Loader / Spinner */
+.loader-orbit {
+  animation: spin 2s linear infinite;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 50%;
+  height: 90px;
+  margin-bottom: 2rem;
+  position: relative;
+  width: 90px;
+}
+
+.loader-orbit span {
+  background: #c084fc;
+  border-radius: 50%;
+  box-shadow: 0 0 18px #c084fc;
+  height: 13px;
+  left: 8px;
+  position: absolute;
+  top: 8px;
+  width: 13px;
+}
+
+/* หมุนตัวแสดงการรอขณะงานยังประมวลผล */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.job-progress .progress {
+  background: rgba(255, 255, 255, .08);
+  height: 5px;
+  margin: 1.3rem 0;
+  max-width: 380px;
+  width: 80%;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  transition: width .5s ease;
+}
+
+.progress-details {
+  color: #b4b4c4;
+  display: flex;
+  font-size: .76rem;
+  gap: .8rem;
+  justify-content: space-between;
+  max-width: 380px;
+  width: 80%;
+}
+
+.live-preview {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin: 1.1rem 0 .8rem;
+  max-height: 180px;
+  max-width: 78%;
+  object-fit: contain;
+}
+
+.queue-badge {
+  background: rgba(96, 165, 250, .13);
+  border: 1px solid rgba(96, 165, 250, .27);
+  border-radius: 99px;
+  color: #bfdbfe;
+  font-size: .72rem;
+  margin: .2rem 0 .7rem;
+  padding: .35rem .7rem;
+}
+
+/* ผลลัพธ์และปุ่มการกระทำ */
+.result-view {
+  height: 100%;
+  min-height: 600px;
+  position: relative;
+}
+
+.result-view>img {
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+  width: 100%;
+}
+
+.result-actions {
+  align-items: center;
+  backdrop-filter: blur(20px);
+  background: rgba(7, 7, 13, .72);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 16px;
+  bottom: 1.3rem;
+  display: flex;
+  justify-content: space-between;
+  left: 1.3rem;
+  padding: .9rem 1rem;
+  position: absolute;
+  right: 1.3rem;
+}
+
+.result-actions div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.result-actions small {
+  color: #75e6c2;
+}
+
+.result-actions strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Auth Card */
+.auth-card {
+  background: #171721;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  color: white;
+  padding: 2rem;
+}
+
+.auth-card .btn-close {
+  position: absolute;
+  right: 1.2rem;
+  top: 1.2rem;
+}
+
+.auth-card>p:not(.eyebrow) {
+  color: var(--muted);
+}
+
+.auth-switch {
+  background: none;
+  border: 0;
+  color: #c4b5fd;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.form-error {
+  background: rgba(251, 113, 133, .12);
+  border: 1px solid rgba(251, 113, 133, .3);
+  border-radius: 10px;
+  color: #fecdd3;
+  font-size: .85rem;
+  margin-top: 1rem;
+  padding: .7rem;
+}
+
+/* Lightbox */
+.lightbox-card {
+  background: #171721;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  color: white;
+  padding: 1.5rem;
+}
+
+.lightbox-card .btn-close {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  z-index: 2;
+}
+
+.lightbox-image {
+  background: #0e0e15;
+  border-radius: 14px;
+  max-height: 70vh;
+  object-fit: contain;
+  width: 100%;
+}
+
+.meta-list {
+  display: grid;
+  font-size: .84rem;
+  grid-template-columns: minmax(105px, .65fr) 1fr;
+  margin: 1.3rem 0;
+}
+
+.meta-list dt {
+  color: #9898aa;
+  font-weight: 500;
+  padding: .36rem 0;
+}
+
+.meta-list dd {
+  margin: 0;
+  padding: .36rem 0;
+  word-break: break-word;
+}

@@ -18,7 +18,6 @@ backend/instance/
 # ไม่นำข้อมูลผู้ใช้และผลลัพธ์ขณะรันเข้าอิมเมจ
 backend/data/
 backend/media/
-backend/backups/
 ai-engine/output/
 ai-engine/uploads/
 # ยกเว้นไลบรารี JavaScript ที่ติดตั้งในเครื่อง
