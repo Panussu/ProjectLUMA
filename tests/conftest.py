@@ -38,6 +38,7 @@ def ai_app(ai_module):
     return ai_module.create_app({
         "TESTING": True,
         "SERVICE_TOKEN": "test-service-token",
+        "PROVIDER_NAME": "development-procedural",
         "AI_PROVIDER": "development-procedural"
     })
 
@@ -83,7 +84,7 @@ def backend_client(backend_app):
 def png_bytes():
     # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
     buffer = io.BytesIO()
-    Image.new("RGB", (64, 64), "#6544cc").save(buffer, format="PNG")
+    Image.new("RGB", (320, 320), "#6544cc").save(buffer, format="PNG")
     return buffer.getvalue()
 
 

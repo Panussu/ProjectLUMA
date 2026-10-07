@@ -32,6 +32,9 @@ def test_process_filter_algorithms(backend_client, png_bytes):
     )
     assert res.status_code == 400
 
+    with Image.open(io.BytesIO(png_bytes)) as src:
+        expected_size = src.size
+
     # 3. Test each of the 4 filter algorithms
     for op in ("grayscale", "edge", "blur", "invert"):
         res = backend_client.post(
@@ -45,7 +48,7 @@ def test_process_filter_algorithms(backend_client, png_bytes):
         with Image.open(io.BytesIO(res.data)) as result_img:
             result_img.verify()
             assert result_img.format == "PNG"
-            assert result_img.size == (64, 64)
+            assert result_img.size == expected_size
 
 
 def test_upscale_algorithm(backend_client, png_bytes):
@@ -55,6 +58,9 @@ def test_upscale_algorithm(backend_client, png_bytes):
         data={"file": (io.BytesIO(png_bytes), "test.png"), "scale_factor": "5.0"},
     )
     assert res.status_code == 400
+
+    with Image.open(io.BytesIO(png_bytes)) as src:
+        expected_upscaled_size = (src.size[0] * 2, src.size[1] * 2)
 
     # 2. Valid 2x Upscale via Lanczos Sinc Resampling
     res = backend_client.post(
@@ -68,4 +74,4 @@ def test_upscale_algorithm(backend_client, png_bytes):
     with Image.open(io.BytesIO(res.data)) as result_img:
         result_img.verify()
         assert result_img.format == "PNG"
-        assert result_img.size == (128, 128)  # 64 * 2 = 128
+        assert result_img.size == expected_upscaled_size
