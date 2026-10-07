@@ -1,115 +1,92 @@
-# 📖 คู่มือการใช้งานระบบฉบับสมบูรณ์ (ProjectLUMA User & Operation Manual)
+# 📖 คู่มือการใช้งานระบบและบริหารจัดการฉบับสมบูรณ์ (ProjectLUMA Complete User & Operation Manual)
 **LUMA (Learning-based Universal Media Artist)**
 
 ---
 
 ## 📌 1. ภาพรวมของระบบ (System Overview)
 
-**ProjectLUMA** เป็นเว็บแอปพลิเคชันปัญญาประดิษฐ์สำหรับการสร้างภาพจากข้อความ (Text-to-Image), การแก้ไขภาพ (Image-to-Image), และการประมวลผลภาพด้วย 5 อัลกอริทึมดิจิทัล โดยรองรับการทำงานทั้งบนเครื่องเดียว (Single-machine), คอนเทนเนอร์ (Docker Compose), และแบบแยก 3 เครื่องบนวงเครือข่ายเดียวกัน (3-PC Same-VLAN Architecture)
+**ProjectLUMA** คือระบบเว็บแอปพลิเคชันปัญญาประดิษฐ์ระดับองค์กรสำหรับการสร้างภาพจากข้อความ (Text-to-Image Generation), การแก้ไขภาพเชิงสร้างสรรค์ (Image-to-Image Editing), และการประมวลผลภาพดิจิทัลด้วย 5 อัลกอริทึมหลัก ตัวระบบออกแบบด้วยสถาปัตยกรรม Microservices ที่แยกอิสระระหว่างส่วนหน้า (Frontend Nginx), ส่วนจัดการข้อมูลหลังบ้าน (Flask Backend API), และส่วนประมวลผล AI (FastAPI AI Engine)
+
+> [!NOTE]
+> ระบบรองรับรูปแบบการติดตั้ง 3 รูปแบบ: **Local Development** (เครื่องเดียวสำหรับทดสอบ), **Docker Compose Deployment** (คอนเทนเนอร์ระดับ Production), และ **3-PC Same-VLAN Architecture** (แยก 3 เครื่องในวงเครือข่ายท้องถิ่น)
+
+```mermaid
+flowchart TD
+    UI[🖥️ Frontend Web Application] -->|HTTP REST / JWT| Backend[⚙️ Flask Backend API]
+    Backend -->|SQLite / Gunicorn| DB[(luma.db / Storage)]
+    Backend -->|Inter-Service HTTP Token Auth| AI[🤖 FastAPI AI Engine]
+    AI -->|Procedural / SDAPI| SD[🎨 Stable Diffusion WebUI Forge]
+```
 
 ### 🌟 ฟีเจอร์หลักของระบบ (Key Features)
-1. **ระบบสมัครสมาชิกและการยืนยันตัวตน (Authentication & JWT):** ระบบจัดการผู้ใช้ รักษาความปลอดภัยด้วย JWT Bearer Token และแยกข้อมูลงานของผู้ใช้แต่ละคน (Data Isolation)
-2. **ระบบสร้างภาพจากข้อความ (Text-to-Image Generation):**
-   * รองรับการใส่ Prompt, Negative Prompt, Seed, Steps, และ CFG Scale
-   * ปรับขนาดภาพอัตโนมัติ (ความกว้างxยาว ต้องหารด้วย 64 ลงตัว)
-   * เลือกโมเดล (Checkpoints), LoRA พร้อมปรับน้ำหนัก (Weight), และประเภท Sampler / Scheduler
-   * 10 Style Presets สำเร็จรูป (เช่น Anime, Cyberpunk, Photorealistic, Pixel Art, ฯลฯ)
-3. **ระบบแก้ไขภาพ (Image-to-Image Edit):**
-   * อัปโหลดภาพต้นฉบับ (PNG, JPEG, WebP) ขนาดสูงสุด 16MB
-   * ปรับค่า Denoising Strength (0.0 - 1.0) ร่วมกับคำสั่งแก้ไข
-4. **5 อัลกอริทึมการประมวลผลภาพดิจิทัล (5 Core Image Algorithms):**
-   * **Grayscale Transform (BT.601):** แปลงภาพเป็นขาวดำตามความไวแสงของตามนุษย์
-   * **Edge Detection (Convolution):** สกัดเส้นขอบด้วย 3x3 Spatial Convolution Filter
-   * **Gaussian Blur Smoothing:** ลดสัญญาณรบกวนความถี่สูง ปรับภาพให้นุ่มนวล
-   * **Color Inversion:** คำนวณสีคู่ตรงข้ามแบบ Pointwise Arithmetic Negation
-   * **Image Super-Resolution (Lanczos Resampling):** ขยายภาพ 2x - 4x ด้วย Anti-aliasing
-5. **ระบบติดตามสถานะและการประมวลผลแบบเรียลไทม์ (Live Progress & Queue):**
-   * แสดงสถานะ Polling (Queued -> Processing -> Completed)
-   * แสดงเปอร์เซ็นต์ความคืบหน้า และประมาณเวลาที่เหลือ
-   * ปุ่มยกเลิกงานประมวลผล (Cancel Generation)
-6. **ระบบดาวน์โหลดและประวัติงาน (Job History & Signed Media Links):**
-   * คลังประวัติผลงานส่วนตัว พร้อมลิงก์ดาวน์โหลดปลอดภัย
+1. **ระบบสมาชิกและ JWT Authentication (Data Isolation):** ลงทะเบียนและเข้าสู่ระบบปลอดภัยด้วย JWT Bearer Token และแยกคลังภาพงานของผู้ใช้แต่ละคนอย่างเด็ดขาด
+2. **ระบบสร้างภาพ Text-to-Image:**
+   * กำหนดคำสั่งสร้างภาพ (Prompt) และคำสั่งยกเว้น (Negative Prompt)
+   * กำหนดขนาดภาพอัตโนมัติ (บังคับความกว้างxยาว ต้องหารด้วย 64 ลงตัว)
+   * ปรับตั้งค่า Steps, CFG Scale, Seed, และเลือก Preset สไตล์ (Anime, Cyberpunk, Photorealistic, Pixel Art, ฯลฯ)
+3. **ระบบแก้ไขภาพ Image-to-Image Edit:**
+   * อัปโหลดภาพต้นฉบับ (รองรับ PNG, JPEG, WebP ขนาดไม่เกิน 16MB)
+   * ปรับระดับ Denoising Strength (0.1 - 1.0)
+4. **5 อัลกอริทึมประมวลผลภาพดิจิทัล (5 Core Algorithms):**
+   * **Grayscale Transform:** แปลงสีตามสูตรความไวแสง ITU-R BT.601 ($Y = 0.299R + 0.587G + 0.114B$)
+   * **Edge Detection:** สกัดเส้นขอบด้วย 3x3 Spatial Convolution Laplacian Filter
+   * **Gaussian Blur:** ลดสัญญาณรบกวนด้วย 2D Gaussian Kernel Smoothing
+   * **Color Inversion:** แปลงสีคู่ตรงข้ามด้วย Pointwise Arithmetic Negation ($255 - I$)
+   * **Super-Resolution (Upscale):** ขยายภาพ 2x/4x ด้วย Lanczos Windowed Sinc Resampling
+5. **ระบบติดตามสถานะงานเรียลไทม์ (Live Polling & Signed Download Links):**
+   * แสดง Progress Bar, Queue Status, ETA
+   * โหลดภาพปลอดภัยผ่าน HMAC Signed Media URL
 
 ---
 
 ## 💻 2. สิ่งที่ต้องเตรียมก่อนใช้งาน (Prerequisites)
 
-* **ระบบปฏิบัติการ:** Windows 10 / Windows 11
-* **ซอฟต์แวร์พื้นฐาน:**
-  * Git (เวอร์ชัน 2.40 ขึ้นไป)
-  * Python 3.11 ขึ้นไป (แนะนำ Python 3.12)
-* **สำหรับการใช้งานร่วมกับ AI จริง (Optional):**
-  * Stability Matrix หรือ Stable Diffusion WebUI Forge (เปิดพอร์ต `--api --port 7860`)
-* **สำหรับการรันผ่าน Docker (Optional):**
-  * Docker Desktop for Windows
+| สภาพแวดล้อม | ซอฟต์แวร์ที่ต้องใช้ | หมายเหตุ |
+| :--- | :--- | :--- |
+| **Local Dev** | Python 3.11+, Git, PowerShell | สำหรับรันบน Windows เครื่องเดียว |
+| **Docker Engine** | Docker Desktop for Windows | สำหรับรันผ่าน Docker Compose |
+| **AI real GPU (Opt.)** | Stability Matrix / SD WebUI Forge | เปิดพอร์ต `--api --port 7860` |
+| **3-PC VLAN** | 3 PCs on same LAN subnet | ปลดล็อก Firewall พอร์ต 80, 5000, 8000 |
 
 ---
 
 ## 🚀 3. วิธีการเริ่มใช้งานระบบ (System Startup Options)
 
-เลือกวิธีเริ่มใช้งานระบบตามสภาพแวดล้อมที่คุณสะดวก:
-
-### 🔹 วิธีที่ 1: รันในเครื่องเดียวแบบ Local Development (แนะนำสำหรับทดสอบโค้ด)
-เปิด PowerShell หน้าต่างใหม่ 3 หน้าต่าง ที่โฟลเดอร์หลัก `ProjectLUMA` แล้วรันสคริปต์ทีละหน้าต่าง:
+### 🔹 วิธีที่ 1: รันในเครื่องเดียวแบบ Local Development
+เปิด PowerShell 3 หน้าต่าง ที่โฟลเดอร์หลัก `ProjectLUMA`:
 
 * **หน้าต่างที่ 1 (เริ่ม AI Engine):**
   ```powershell
   ./scripts/run-ai.ps1
   ```
-  *(ระบบจะสร้าง `.venv` และเปิดบริการ FastAPI บน `http://localhost:8000`)*
-
 * **หน้าต่างที่ 2 (เริ่ม Backend API):**
   ```powershell
   ./scripts/run-backend.ps1
   ```
-  *(ระบบจะสร้าง `.venv` และเปิดบริการ Flask บน `http://localhost:5000`)*
-
-* **หน้าต่างที่ 3 (เริ่ม Frontend Web Server):**
+* **หน้าต่างที่ 3 (เริ่ม Frontend Server):**
   ```powershell
   ./scripts/run-frontend.ps1
   ```
-  *(เปิดให้บริการหน้าเว็บ static บน `http://localhost:8080`)*
-
-👉 **การเข้าใช้งาน:** เปิดเบราว์เซอร์แล้วไปที่ `http://localhost:8080`
+👉 **การเข้าใช้งาน:** เปิดเบราว์เซอร์ไปที่ `http://localhost:8080`
 
 ---
 
-### 🔹 วิธีที่ 2: รันผ่าน Docker Compose (คำสั่งเดียวจบ)
+### 🔹 วิธีที่ 2: รันผ่าน Docker Compose (Production Standard)
 เปิด PowerShell ที่โฟลเดอร์หลัก แล้วใช้คำสั่ง:
-
 ```powershell
-./scripts/deploy.ps1 -Build
+./scripts/deploy.ps1 -Env prod -Build
 ```
-หรือใช้คำสั่ง Docker โดยตรง:
-```powershell
-docker compose up --build -d
-```
-
-👉 **การเข้าใช้งาน:** เปิดเบราว์เซอร์แล้วไปที่ `http://localhost`
+👉 **การเข้าใช้งาน:** เปิดเบราว์เซอร์ไปที่ `http://localhost`
 
 ---
 
-### 🔹 วิธีที่ 3: ติดตั้งและเปิดรันแบบ 3 เครื่องบนวง VLAN (สำหรับสาธิต 3-PC Setup)
-สมมุติ IP ตัวอย่างในเครือข่าย:
-* **PC 1 (เครื่อง AI Engine):** `192.168.1.30`
-* **PC 2 (เครื่อง Nginx Frontend):** `192.168.1.10`
-* **PC 3 (เครื่อง Backend):** `192.168.1.20`
+### 🔹 วิธีที่ 3: ติดตั้งและเปิดรันแบบ 3 เครื่องบนวง VLAN
+ดูขั้นตอนอย่างละเอียดใน [PROJECTLUMA_3PC_TEST_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/PROJECTLUMA_3PC_TEST_GUIDE.md)
 
-1. **PC 1 (ฝั่ง AI):**
-   * เปิด WebUI Forge พอร์ต `7860`
-   * สร้าง `ai-engine/.env` กำหนด `AI_SERVICE_TOKEN`
-   * รันสคริปต์ `./scripts/run-ai.ps1` (พอร์ต `8000`)
-
-2. **PC 3 (ฝั่ง Backend):**
-   * สร้าง `backend/.env` กำหนด `AI_SERVICE_URL=http://192.168.1.30:8000` และตั้งค่า `AI_SERVICE_TOKEN` ให้ตรงกับ PC 1
-   * รันสคริปต์ `./scripts/run-backend.ps1` (พอร์ต `5000`)
-
-3. **PC 2 (ฝั่ง Frontend & Nginx):**
-   * ติดตั้ง Nginx วางไฟล์ `nginx/nginx.conf` และ `nginx/luma.conf`
-   * กำหนด upstream ใน Nginx ให้ชี้ไปที่ PC 3 (`192.168.1.20:5000`)
-   * รันบริการ Nginx (พอร์ต `80`)
-
-👉 **การเข้าใช้งาน:** เครื่องผู้ใช้ในวง LAN เปิดเบราว์เซอร์ไปที่ `http://192.168.1.10`
+1. **PC 1 (`192.168.1.30`):** รัน AI Engine (`./scripts/run-ai.ps1`) พอร์ต `8000`
+2. **PC 3 (`192.168.1.20`):** รัน Backend API (`./scripts/run-backend.ps1`) พอร์ต `5000`
+3. **PC 2 (`192.168.1.10`):** รัน Nginx Reverse Proxy พอร์ต `80`
+👉 **การเข้าใช้งาน:** เครื่องผู้ใช้เปิดเบราว์เซอร์ไปที่ `http://192.168.1.10`
 
 ---
 
@@ -118,97 +95,80 @@ docker compose up --build -d
 ### 🔑 ขั้นตอนที่ 1: การลงทะเบียนและเข้าสู่ระบบ (Authentication)
 1. เปิดหน้าเว็บ LUMA บนเบราว์เซอร์
 2. หากยังไม่มีบัญชี ให้คลิกปุ่ม **"Register"**
-   * กรอก **Username** (ความยาว 3 - 40 ตัวอักษร)
-   * กรอก **Password** (ความยาวอย่างน้อย 8 ตัวอักษร)
-3. คลิก **"Sign Up"** เมื่อสำเร็จระบบจะล็อกอินให้อัตโนมัติ หรือคลิก **"Login"** เพื่อเข้าสู่ระบบด้วยบัญชีที่มีอยู่
-4. เมื่อเข้าสู่ระบบสำเร็จ จะเห็นชื่อผู้ใช้และสถานะการเชื่อมต่อ (Health Badge) มุมบนขวา
+   * **Username:** ความยาว 3 - 40 ตัวอักษร
+   * **Password:** ความยาวอย่างน้อย 8 ตัวอักษร
+3. คลิก **"Sign Up"** ระบบจะลงทะเบียนและล็อกอินให้อัตโนมัติ
 
 ---
 
 ### 🖼️ ขั้นตอนที่ 2: การสร้างภาพจากข้อความ (Text-to-Image Generation)
-1. เลือกแท็บ **"Text to Image"** บนเมนูหลัก
-2. **กรอกรายละเอียดคำสั่ง (Prompt Controls):**
-   * **Prompt (คำสั่งสร้างภาพ):** ใส่คำอธิบายภาพที่ต้องการ เช่น `a futuristic neon city at night, masterpiece, high resolution`
-   * **Negative Prompt (สิ่งที่ไม่อยากให้มี):** เช่น `blurry, low quality, distorted, bad anatomy`
-3. **ปรับแต่งค่าทางเทคนิค (Generation Parameters):**
-   * **Dimensions (ขนาดภาพ):** เลือกสัดส่วน (เช่น 512x512, 768x768, 512x768) *ระบบจะบังคับให้กว้างxยาวหารด้วย 64 ลงตัว*
-   * **Steps (จำนวนขั้นตอนสกัดภาพ):** ปรับระหว่าง 1 - 50 ขั้นตอน (ค่าเริ่มต้น 20)
-   * **CFG Scale (ความเข้มงวดทำตาม Prompt):** ปรับระหว่าง 1.0 - 20.0 (ค่าเริ่มต้น 7.0)
-   * **Seed:** ใส่ตัวเลขเจาะจง หรือคลิกปุ่ม **"Random Seed"**
-4. **เลือกสไตล์สำเร็จรูป (Style Presets):**
-   * คลิกเลือกแท็บสไตล์ เช่น *Anime Masterpiece*, *Cyberpunk Neon*, *Cinematic Film*, *Pixel Art* ระบบจะปรับแต่งคำอธิบายให้อัตโนมัติ
-5. **กดสร้างภาพ (Generate):**
-   * คลิกปุ่ม **"Generate Image"** 
-   * ระบบจะแสดงหลอดความคืบหน้า (Progress Bar) สถานะคิว และประมาณเวลาที่เหลือ
-6. เมื่อเสร็จสิ้น ภาพจะปรากฏในช่องผลลัพธ์ พร้อมรายละเอียดการเจนภาพ และปุ่ม **"Download Image"**
+1. เลือกแท็บ **"Text to Image"**
+2. **กรอกคำสั่งสร้างภาพ (Prompt):** เช่น `a futuristic neon city at night, masterpiece`
+3. **ปรับแต่งพารามิเตอร์:**
+   * **Dimensions:** เลือกขนาดภาพ (ระบบบังคับให้กว้าง/ยาว หารด้วย 64 ลงตัว)
+   * **Steps:** 1 - 50 (แนะนำ 20)
+   * **CFG Scale:** 1.0 - 20.0 (แนะนำ 7.0)
+   * **Seed:** เจาะจงตัวเลขหรือกด Random
+4. **เลือก Presets สไตล์:** คลิกเลือก *Anime Masterpiece*, *Cyberpunk Neon*, ฯลฯ
+5. คลิก **"Generate Image"** แล้วรอระบบประมวลผล
 
 ---
 
 ### ✏️ ขั้นตอนที่ 3: การแก้ไขภาพ (Image-to-Image Edit)
 1. เลือกแท็บ **"Image Edit"**
-2. **อัปโหลดภาพต้นฉบับ:** ดึงไฟล์ภาพมาวางในกล่อง Dropzone หรือคลิกเพื่อเลือกไฟล์ (รองรับ PNG, JPEG, WebP ไม่เกิน 16MB)
-3. **กำหนดคำสั่งแก้ไข (Edit Prompt):** ระบุการเปลี่ยนแปลงที่ต้องการ เช่น `change background to a snowy mountain, warm lighting`
-4. **ปรับความเข้มการเปลี่ยนภาพ (Denoising Strength):**
-   * `0.1 - 0.4`: เปลี่ยนแปลงน้อย ยึดตามโครงเดิม
-   * `0.5 - 0.7`: เปลี่ยนแปลงปานกลาง (ค่าแนะนำ 0.65)
-   * `0.8 - 1.0`: เปลี่ยนแปลงภาพเดิมเกือบทั้งหมด
-5. คลิก **"Apply Image Edit"** แล้วรอระบบประมวลผล
+2. **อัปโหลดภาพต้นฉบับ:** ลากวางไฟล์ภาพในกล่อง Dropzone (PNG, JPEG, WebP ไม่เกิน 16MB)
+3. **ระบุคำสั่งแก้ไข (Edit Prompt):** เช่น `change lighting to warm sunset`
+4. **ปรับ Denoising Strength:** `0.1` (เปลี่ยนน้อย) ถึง `1.0` (เปลี่ยนใหม่ทั้งหมด)
+5. คลิก **"Apply Image Edit"**
 
 ---
 
-### 🧪 ขั้นตอนที่ 4: การใช้งาน 5 อัลกอริทึมประมวลผลภาพ (5 Image Processing Algorithms)
-ผู้ใช้สามารถนำภาพเข้าสู่กระบวนการประมวลผลทางดิจิทัลได้ดังนี้:
-1. **Grayscale Transform:** คลิกเลือกเมนู `Grayscale` เพื่อแปลงโทนสีตามสูตรความไวแสง ITU-R BT.601
-2. **Edge Detection:** คลิกเลือกเมนู `Edge Detection` เพื่อตรวจจับและสกัดเส้นขอบด้วย 3x3 Convolution Filter
-3. **Gaussian Blur:** คลิกเลือกเมนู `Gaussian Blur` เพื่อเบลอภาพอย่างนุ่มนวล ลด Noise
-4. **Color Inversion:** คลิกเลือกเมนู `Color Inversion` เพื่อสลับเป็นสีตรงข้าม (Negative Color)
-5. **Super-Resolution (Upscale):** เลือกเมนู `Upscale 2x/4x` เพื่อขยายขนาดภาพโดยรักษาความคมชัดด้วย Lanczos Windowed Sinc Resampling
+### 🧪 ขั้นตอนที่ 4: การใช้งาน 5 อัลกอริทึมประมวลผลภาพ
+ผู้ใช้สามารถนำภาพเข้ากระบวนการประมวลผลทางดิจิทัลได้ทันที:
+1. **Grayscale:** แปลงภาพเป็นโทนขาวดำตามสูตร ITU-R BT.601
+2. **Edge Detection:** สกัดเส้นขอบภาพด้วย Spatial Laplacian Convolution
+3. **Gaussian Blur:** ปรับภาพให้นุ่มนวล ลด Noise
+4. **Color Inversion:** สลับเป็นสีคู่ตรงข้าม
+5. **Super-Resolution (Upscale):** ขยายภาพ 2x/4x ด้วย Lanczos Resampling
 
 ---
 
-### 📂 ขั้นตอนที่ 5: การดูประวัติผลงานและการดาวน์โหลด (Job History & Media Download)
+### 📂 ขั้นตอนที่ 5: การดูประวัติผลงานและการดาวน์โหลด
 1. เลื่อนลงมาที่ส่วน **"My History & Saved Images"**
-2. ระบบจะแสดงรายการภาพทั้งหมดที่คุณเคยสร้างไว้
-3. คลิกที่รูปภาพเพื่อเปิดดูภาพขนาดเต็ม (Lightbox Display) พร้อมรายละเอียด Seed และพารามิเตอร์ที่ใช้
-4. คลิกปุ่ม **"Download"** เพื่อบันทึกภาพลงเครื่องคอมพิวเตอร์ผ่าน Signed Media URL
+2. คลิกที่รูปภาพเพื่อเปิดดูขนาดเต็ม (Lightbox Display)
+3. คลิกปุ่ม **"Download Image"** เพื่อบันทึกภาพลงเครื่องคอมพิวเตอร์
 
 ---
 
-## 🛠️ 5. เครื่องมือและการดูแลรักษาระบบ (DevOps & Operations Utilities)
+## 🛠️ 5. เครื่องมือผู้ดูแลระบบและ DevOps (DevOps Utilities & Scripts)
 
-สำหรับผู้ดูแลระบบ (DevOps/Admin) มีสคริปต์ PowerShell สำเร็จรูปในโฟลเดอร์ `scripts/`:
-
-### 1. สคริปต์สำรองข้อมูลอัตโนมัติ (`scripts/backup.ps1`)
-สั่งรันสคริปต์เพื่อบีบอัดฐานข้อมูล SQLite (`luma.db`) และโฟลเดอร์ภาพสื่อ `/media` เป็นไฟล์ ZIP พร้อมลบไฟล์สำรองข้อมูลที่เก่าเกิน 7 วัน:
-```powershell
-./scripts/backup.ps1
-```
-
-### 2. สคริปต์ตรวจสอบสถานะระบบ (`scripts/check-status.ps1`)
-ยิงตรวจสอบความพร้อมของ Frontend, Backend และ AI Engine:
-```powershell
-./scripts/check-status.ps1
-```
-
-### 3. สคริปต์ตรวจสอบการเชื่อมต่อเครือข่าย 3 เครื่อง (`scripts/check-network.ps1`)
-ตรวจสอบว่า PC 2 ติดต่อ PC 3 ได้ และ PC 3 ติดต่อ PC 1 ผ่านพอร์ต 5000/8000 ได้หรือไม่:
-```powershell
-./scripts/check-network.ps1 -BackendHost "192.168.1.20" -AiHost "192.168.1.30"
-```
+| สคริปต์ | หน้าที่การทำงาน | คำสั่งที่ใช้ |
+| :--- | :--- | :--- |
+| `scripts/backup.ps1` | สำรองข้อมูล SQLite DB & Media files | `./scripts/backup.ps1 -RetentionDays 7` |
+| `scripts/restore.ps1` | กู้คืนฐานข้อมูลและภาพสื่อจาก ZIP backup | `./scripts/restore.ps1 -ZipFile <file.zip>` |
+| `scripts/check-status.ps1` | ตรวจสอบความพร้อมของ 3 บริการ | `./scripts/check-status.ps1` |
+| `scripts/check-network.ps1` | ตรวจสอบการเชื่อมต่อพอร์ต 3 เครื่อง VLAN | `./scripts/check-network.ps1` |
+| `scripts/run-all-tests.ps1` | สั่งรันชุดทดสอบ QA อัตโนมัติทั้งหมด | `./scripts/run-all-tests.ps1` |
 
 ---
 
 ## ❓ 6. การแก้ไขปัญหาที่พบบ่อย (Troubleshooting & FAQs)
 
-| ปัญหาที่พบ (Issue) | สาเหตุที่เป็นไปได้ (Possible Cause) | แนวทางแก้ไข (Resolution) |
+| ปัญหาที่พบ (Issue) | สาเหตุที่เป็นไปได้ | แนวทางแก้ไข (Resolution) |
 | :--- | :--- | :--- |
-| **ขึ้นสถานะ "AI Unavailable" (503)** | AI Engine หรือ Stable Diffusion Forge ล่ม / ไม่ได้เปิด | 1. ตรวจสอบว่า `scripts/run-ai.ps1` หรือ WebUI Forge พอร์ต 7860 เปิดอยู่หรือไม่<br>2. หากไม่มี GPU ระบบจะสลับไปใช้โหมดจำลอง `development-procedural` ให้อัตโนมัติ |
-| **ขึ้นข้อผิดพลาด "Unauthorized" (401)** | โทเคน JWT หมดอายุ หรือ `AI_SERVICE_TOKEN` ไม่ตรงกัน | 1. ลองกด Logout แล้วกด Login เข้าสู่ระบบใหม่อีกครั้ง<br>2. ตรวจสอบว่าค่า `AI_SERVICE_TOKEN` ใน `backend/.env` และ `ai-engine/.env` ตรงกัน |
-| **ขึ้นข้อผิดพลาด "Dimension must be divisible by 64"** | กำหนดขนาดภาพความกว้างหรือยาวไม่ลงตัว | ปรับขนาดภาพให้เป็นพหุคูณของ 64 เช่น 512, 768, 1024 |
-| **อัปโหลดภาพแก้ไขไม่ได้ (413 Payload Too Large)** | ไฟล์ภาพมีขนาดใหญ่เกิน 16MB | บีบอัดไฟล์ภาพหรือแปลงเป็นไฟล์ PNG/JPEG ที่มีขนาดน้อยกว่า 16MB ก่อนอัปโหลด |
-| **เบราว์เซอร์ขึ้น 504 Gateway Timeout** | AI Engine ประมวลผลนานเกินไป | ตรวจสอบว่าใน Nginx ตั้งค่า `proxy_read_timeout 190s;` เรียบร้อยแล้ว |
+| **ขึ้นสถานะ "AI Unavailable" (503)** | AI Engine หรือ WebUI Forge ล่ม | ตรวจสอบพอร์ต 8000/7860 หากไม่มี GPU ระบบจะใช้ procedural provider แทน |
+| **ขึ้นข้อผิดพลาด "Unauthorized" (401)** | โทเคน JWT หมดอายุ | กด Logout แล้วกด Login เข้าสู่ระบบใหม่อีกครั้ง |
+| **ขึ้นข้อผิดพลาด "Dimension must be divisible by 64"** | ขนาดภาพไม่ลงตัว | ปรับขนาดภาพให้เป็นพหุคูณของ 64 เช่น 512, 768, 1024 |
+| **อัปโหลดภาพแก้ไขไม่ได้ (413 Payload Too Large)** | ไฟล์ใหญ่เกิน 16MB | บีบอัดไฟล์ภาพให้มีขนาดน้อยกว่า 16MB ก่อนอัปโหลด |
 
 ---
 
-**คู่มือฉบับนี้จัดทำขึ้นสำหรับ ProjectLUMA 1.0.0**  
-*หากมีข้อสงสัยเพิ่มเติม สามารถตรวจสอบรายละเอียดสัญญา API ได้ใน [docs/API_CONTRACT.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/API_CONTRACT.md)*
+> [!TIP]
+> สำหรับข้อมูลเพิ่มเติม โปรดดูเอกสารทางเทคนิค:
+> - สัญญา API: [docs/API_CONTRACT.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/API_CONTRACT.md)
+> - คู่มือ 3-PC Setup: [docs/PROJECTLUMA_3PC_TEST_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/PROJECTLUMA_3PC_TEST_GUIDE.md)
+> - คู่มือ DevOps Operations: [docs/DEVOPS_RUNBOOK.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/DEVOPS_RUNBOOK.md)
+> - คู่มือ QA Testing: [docs/QA_TEST_SUITE_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/QA_TEST_SUITE_GUIDE.md)
+
+---
+**คู่มือฉบับสมบูรณ์สำหรับ ProjectLUMA 1.0.0**

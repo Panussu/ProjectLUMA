@@ -8,9 +8,9 @@
 * **ชื่อระบบ:** Project LUMA (Learning-based Universal Media Artist)
 * **เวอร์ชันระบบ:** 1.0.0 (Production Candidate)
 * **วันที่ทำการทดสอบ:** 4 ตุลาคม 2026
-* **บทบาทผู้รับผิดชอบ (QA Lead):** ทีมประกันคุณภาพและตรวจสอบระบบ (QA Engineer)
+* **บทบาทผู้รับผิดชอบ (QA & DevOps Lead):** ทีมประกันคุณภาพและตรวจสอบระบบ (QA & DevOps Engineering Team)
 * **สภาพแวดล้อมการทดสอบ:** 
-  * **Automated Environment:** Pytest 8.4.1 (Python 3.12/3.13)
+  * **Automated Environment:** Pytest 8.4.1 (Python 3.12/3.13) + Node.js 22 Syntax Check
   * **3-PC VLAN Infrastructure:** PC 1 (AI Engine `192.168.1.30`), PC 2 (Nginx Frontend `192.168.1.10`), PC 3 (Flask Backend `192.168.1.20`)
 * **ผลการทดสอบรวม (Overall Test Status):** **PASSED (100% Success Rate)** 🏆
 
@@ -18,15 +18,15 @@
 
 ## 👥 2. ตารางตรวจสอบความถูกต้อง 5 อัลกอริทึม (5-Person Distinct Algorithm Verification)
 
-ระบบผ่านการตรวจสอบความถูกต้องของอัลกอริทึมการประมวลผลภาพ 5 รูปแบบตามข้อกำหนดของอาจารย์ผู้สอน:
+ระบบผ่านการตรวจสอบความถูกต้องของอัลกอริทึมการประมวลผลภาพ 5 รูปแบบตามข้อกำหนดของรายวิชา:
 
 | ลำดับ | สมาชิก / บทบาท | ชื่ออัลกอริทึม (Algorithm Name) | สูตรคำนวณ / หลักการ (Mathematical Model) | API Endpoint ที่รับรอง | ผลการทดสอบ |
 | :---: | :--- | :--- | :--- | :--- | :---: |
-| 1 | **Person 1 (AI/Img)** | **Grayscale Luminance Transform** | `Y = 0.299*R + 0.587*G + 0.114*B` (ITU-R BT.601) | `POST /process` (`operation=grayscale`) | **PASSED** ✅ |
-| 2 | **Person 2 (AI/Img)** | **Edge Detection Spatial Convolution** | 3x3 Laplacian Convolution Kernel (FIND_EDGES) | `POST /process` (`operation=edge`) | **PASSED** ✅ |
-| 3 | **Person 3 (Backend)** | **Gaussian Blur Kernel Smoothing** | `G(x,y) = (1/2πσ²) * e^(-(x²+y²)/2σ²)` | `POST /process` (`operation=blur`) | **PASSED** ✅ |
-| 4 | **Person 4 (Frontend)** | **Color Inversion Arithmetic Negation** | `I_out(x,y) = 255 - I_in(x,y)` (Pointwise Negation) | `POST /process` (`operation=invert`) | **PASSED** ✅ |
-| 5 | **Person 5 (Upscale)** | **Lanczos Windowed Sinc Resampling** | `L(x) = sinc(x)*sinc(x/a)` (Real-ESRGAN Super-Resolution) | `POST /v1/upscale` | **PASSED** ✅ |
+| 1 | **Person 1 (AI/Img)** | **Grayscale Luminance Transform** | $Y = 0.299R + 0.587G + 0.114B$ (ITU-R BT.601) | `POST /process` (`operation=grayscale`) | **PASSED** ✅ |
+| 2 | **Person 2 (AI/Img)** | **Edge Detection Spatial Convolution** | 3x3 Laplacian Convolution Kernel | `POST /process` (`operation=edge`) | **PASSED** ✅ |
+| 3 | **Person 3 (Backend)** | **Gaussian Blur Kernel Smoothing** | $G(x,y) = \frac{1}{2\pi\sigma^2} e^{-\frac{x^2+y^2}{2\sigma^2}}$ | `POST /process` (`operation=blur`) | **PASSED** ✅ |
+| 4 | **Person 4 (Frontend)** | **Color Inversion Arithmetic Negation** | $I_{out}(x,y) = 255 - I_{in}(x,y)$ (Pointwise Negation) | `POST /process` (`operation=invert`) | **PASSED** ✅ |
+| 5 | **Person 5 (Upscale)** | **Lanczos Windowed Sinc Resampling** | $L(x) = \text{sinc}(x)\text{sinc}(x/a)$ (Real-ESRGAN / Sinc) | `POST /v1/upscale` | **PASSED** ✅ |
 
 ---
 
@@ -61,7 +61,7 @@
 
 ## 🌐 4. รายงานการทดสอบ 3-PC Same-VLAN Acceptance Test Matrix
 
-ตารางการบันทึกผลการทดสอบการเชื่อมต่อจริงในระบบ 3 เครื่องบนวงเครือข่าย VLAN เดียวกัน (ตามคู่มือ [PROJECTLUMA_3PC_TEST_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/PROJECTLUMA_3PC_TEST_GUIDE.md)):
+ตารางการบันทึกผลการทดสอบการเชื่อมต่อจริงในระบบ 3 เครื่องบนวงเครือข่าย VLAN เดียวกัน (ตามคู่มือ [PROJECTLUMA_3PC_TEST_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/PROJECTLUMA_3PC_TEST_GUIDE.md)):
 
 | ลำดับการตรวจ | หัวข้อการทดสอบ | วิธีการทดสอบ / คำสั่งที่ใช้ | ผลลัพธ์ที่คาดหวัง | สถานะจริง |
 | :---: | :--- | :--- | :--- | :---: |
@@ -90,7 +90,7 @@
 
 ## 🏆 6. คำรับรองคุณภาพซอฟต์แวร์ (QA Certification Statement)
 
-ข้าพเจ้าในนามทีมประกันคุณภาพซอฟต์แวร์ (QA Engineering Team) ขอรับรองว่าระบบ **Project LUMA (Learning-based Universal Media Artist)** ได้ผ่านขั้นตอนการทดสอบอย่างครบถ้วนและเข้มงวด ทั้งในระดับ Unit Test, Integration Test, Security Boundary Test และ 3-PC VLAN Deployment Acceptance Test ตัวระบบมีความเสถียร ปลอดภัย และตรงตามข้อกำหนดของรายวิชา 100%
+ข้าพเจ้าในนามทีมประกันคุณภาพซอฟต์แวร์ (QA & DevOps Engineering Team) ขอรับรองว่าระบบ **Project LUMA (Learning-based Universal Media Artist)** ได้ผ่านขั้นตอนการทดสอบอย่างครบถ้วนและเข้มงวด ทั้งในระดับ Unit Test, Integration Test, Security Boundary Test และ 3-PC VLAN Deployment Acceptance Test ตัวระบบมีความเสถียร ปลอดภัย และตรงตามข้อกำหนดของรายวิชา 100%
 
 **ลงชื่อผู้ตรวจสอบ:** ทีมงานประกันคุณภาพ ProjectLUMA (QA Lead)  
 **วันที่รับรอง:** 4 ตุลาคม 2026

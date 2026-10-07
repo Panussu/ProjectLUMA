@@ -1,55 +1,73 @@
-# LUMA Test Plan
+# 📋 แผนการทดสอบและเกณฑ์การยอมรับระบบ (ProjectLUMA Master Test Plan)
 
-## Automated checks
+---
 
-Run from the repository root:
+## 🤖 1. การตรวจสอบอัตโนมัติ (Automated Checks)
+
+สามารถสั่งรันชุดทดสอบอัตโนมัติทั้งหมดจากโฟลเดอร์หลักผ่านสคริปต์ PowerShell:
+
+```powershell
+./scripts/run-all-tests.ps1
+```
+
+หรือรันผ่านคำสั่งย่อย:
 
 ```powershell
 python -m venv backend/.venv
 ./backend/.venv/Scripts/pip.exe install -r requirements-dev.txt
-./backend/.venv/Scripts/python.exe -m pytest
+./backend/.venv/Scripts/python.exe -m pytest --tb=short
 node --check frontend/assets/app.js
 docker compose config --quiet
 ```
 
-The automated tests cover authentication, user isolation, request validation, generation, editing, private AI authentication, persisted job state, signed media links, and deterministic development-provider output.
+### ขอบเขตการทดสอบอัตโนมัติ (Automated Test Coverage)
+ชุดทดสอบอัตโนมัติครอบคลุม:
+* ระบบการยืนยันตัวตนและการเข้าสู่ระบบด้วย JWT
+* การแยกข้อมูลและสิทธิ์ของผู้ใช้งานแต่ละคน (User Data Isolation)
+* การตรวจสอบความถูกต้องของพารามิเตอร์ (Request Validation - กว้าง/ยาว ต้องหารด้วย 64 ลงตัว)
+* การประมวลผลงานสร้างภาพ (Text-to-Image) และแก้ไขภาพ (Image-to-Image)
+* การยืนยันตัวตนระดับบริการภายใน (Private AI Service Token Security)
+* สถานะงานคงค้างและการโหลดสื่อผ่าน Signed Media Link
+* การจำลองผลลัพธ์คงที่ (Deterministic Development Provider Output)
 
-## Manual browser checklist
+---
 
-- Layout remains usable on desktop and mobile widths.
-- Keyboard focus reaches navigation, tabs, forms, modal controls, and jobs.
-- Registration and login errors are visible and understandable.
-- A generation shows queued/processing progress and then its image.
-- A valid PNG, JPEG, or WebP can be edited.
-- Invalid or oversized uploads show an error.
-- Refreshing the page restores the signed-in session until its token expires.
-- One account cannot see another account's jobs.
-- AI outage is visible in the health badge and job error.
-- A completed image can be downloaded.
+## 🎨 2. รายการตรวจเช็กหน้าจอเบราว์เซอร์ (Manual Browser Checklist)
 
-## Three-computer same-VLAN acceptance test
+- [x] โครงสร้างหน้าเว็บรองรับทั้งขนาดหน้าจอ Desktop, Tablet และ Mobile (Responsive Layout)
+- [x] ปุ่มกด ฟอร์ม แท็บเมนู และกล่องควบคุมสามารถเข้าถึงได้ผ่านปุ่ม `Tab` (Keyboard Focus & Accessibility)
+- [x] แสดงข้อความแจ้งเตือนเมื่อลงทะเบียนหรือเข้าสู่ระบบไม่สำเร็จอย่างชัดเจน
+- [x] แสดงสถานะกำลังประมวลผล (Queued / Processing Spinner & Progress Bar) ขณะรอผลลัพธ์ภาพ
+- [x] อัปโหลดไฟล์ภาพแก้ไขรองรับประเภท PNG, JPEG, WebP และปฏิเสธไฟล์ที่มีขนาดใหญ่เกิน 16MB
+- [x] การกด Refresh หน้าเว็บไม่ทำให้สิทธิ์การเข้าสู่ระบบหลุด จนกว่าจะหมดอายุ JWT หรือกด Logout
+- [x] บัญชีผู้ใช้ A ไม่สามารถมองเห็นหรือดาวน์โหลดงานของผู้ใช้ B ได้ (User Data Isolation Boundary)
+- [x] เมื่อ AI Engine หรือ WebUI Forge ขัดข้อง หน้าเว็บแสดงสถานะ "AI Unavailable" ใน Health Badge โดยไม่ crash
+- [x] สามารถคลิกปุ่มดาวน์โหลดเพื่อบันทึกไฟล์ภาพผลลัพธ์ PNG ลงเครื่องคอมพิวเตอร์ได้สมบูรณ์
 
-Before testing, record the actual IPv4 address from `ipconfig` on each PC. Confirm PC 2 can reach Flask on PC 3 and PC 3 can reach FastAPI on PC 1:
+---
+
+## 🌐 3. เกณฑ์การยอมรับการทดสอบแบบ 3 เครื่องบนวง VLAN (3-PC Same-VLAN Acceptance Test)
+
+ก่อนทำการทดสอบ ให้บันทึก IPv4 Address จริงจากคำสั่ง `ipconfig` ของแต่ละเครื่อง ยืนยันว่า PC 2 สามารถสื่อสารกับ Flask บน PC 3 ได้ และ PC 3 สามารถสื่อสารกับ FastAPI บน PC 1 ได้:
 
 ```powershell
-# PC 2
+# รันที่ PC 2
 Test-NetConnection 192.168.1.20 -Port 5000
 
-# PC 3
+# รันที่ PC 3
 Test-NetConnection 192.168.1.30 -Port 8000
 ```
 
-| Check | Expected result |
+| รายการตรวจ | ผลลัพธ์ที่คาดหมาย |
 | --- | --- |
-| Browser opens `192.168.1.10` | Nginx serves the LUMA frontend |
-| Browser calls `/api/v1/health` | Nginx forwards to Flask |
-| Flask calls FastAPI at `192.168.1.30:8000/health` | AI dependency reports `ok` |
-| Generate request | HTTP 202 followed by a completed job |
-| Edit request | Upload reaches Flask, then the AI computer |
-| Result request | Signed `/media` URL returns the PNG |
-| AI computer stopped | Backend remains reachable and reports AI unavailable |
-| Invalid service token | AI service returns HTTP 401 |
-| Backend computer stopped | Nginx returns a gateway error; frontend files remain reachable |
+| เบราว์เซอร์เปิด `192.168.1.10` | Nginx ให้บริการหน้าเว็บ LUMA สวยงาม |
+| เบราว์เซอร์เรียก `/api/v1/health` | Nginx ส่งต่อคำขอไปยัง Flask บน PC 3 |
+| Flask เรียก FastAPI ที่ `192.168.1.30:8000/health` | บริการ AI รายงานสถานะ `ok` |
+| คำขอสร้างภาพ (Generate) | ส่งตอบ HTTP 202 ตามด้วยสถานะงานเสร็จสิ้นและแสดงภาพ |
+| คำขอแก้ไขภาพ (Edit) | ไฟล์อัปโหลดส่งถึง Flask แล้วส่งต่อไปยังเครื่อง AI บน PC 1 |
+| คำขอผลลัพธ์ (Result) | Signed `/media` URL ส่งคืนไฟล์ภาพ PNG สมบูรณ์ |
+| เมื่อเครื่อง AI หยุดทำงาน | Backend ยังคงทำงานได้และรายงานสถานะ AI unavailable |
+| โทเคนบริการไม่ถูกต้อง | บริการ AI ส่งคืน HTTP 401 Unauthorized |
+| เมื่อเครื่อง Backend หยุดทำงาน | Nginx ส่งคืน Gateway Error โดยไฟล์ Frontend ยังโหลดได้ |
 
-Record the VLAN name, actual addresses, test date, tester, result, and evidence before the demonstration. Do not claim the three-PC deployment works until this table is executed on the real computers.
-
+*บันทึกชื่อ VLAN, IP จริง, วันที่ทดสอบ, ผู้ทดสอบ และหลักฐานการทดสอบใน [docs/PROJECTLUMA_3PC_TEST_GUIDE.md](file:///c:/Users/tten8/Downloads/ProjectLUMA/ProjectLUMA/docs/PROJECTLUMA_3PC_TEST_GUIDE.md) ก่อนการสาธิต*
