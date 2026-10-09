@@ -19,6 +19,9 @@ backend/instance/
 backend/data/
 backend/media/
 backend/backups/
+backend_backup_*/
+backend/logs/
+*.log
 ai-engine/output/
 ai-engine/uploads/
 # ยกเว้นไลบรารี JavaScript ที่ติดตั้งในเครื่อง

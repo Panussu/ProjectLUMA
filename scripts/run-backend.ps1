@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
 
 # ติดตั้งไลบรารีตามรายการที่กำหนดไว้ในบริการ
 
-& $pipPath install -r (Join-Path $serviceRoot "requirements.txt") --disable-pip-version-check
+& $pythonPath -m pip install -r (Join-Path $serviceRoot "requirements.txt") --disable-pip-version-check
 
 # เลือกตัวอย่างค่าพัฒนาหรือ VLAN และให้แก้ค่าตัวอย่างก่อนเปิดบนเครือข่าย
 

@@ -29,9 +29,33 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     Path(app.config["MEDIA_ROOT"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["UPLOAD_ROOT"]).mkdir(parents=True, exist_ok=True)
 
+    log_dir = Path(os.getenv("LOG_DIR", Path(__file__).resolve().parents[1] / "logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "backend.log"
+
+    log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=int(os.getenv("LOG_MAX_BYTES", 10 * 1024 * 1024)),
+            backupCount=int(os.getenv("LOG_BACKUP_COUNT", 5)),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(logging.Formatter(log_format))
+        handlers.append(file_handler)
+    except Exception as exc:
+        app.logger.warning("Failed to initialize file logger: %s", exc)
+
     logging.basicConfig(
-        level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        level=log_level,
+        format=log_format,
+        handlers=handlers,
+        force=True,
     )
     db.init_app(app)
     jwt.init_app(app)
@@ -74,6 +98,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         response.headers["X-Request-ID"] = getattr(g, "request_id", "")
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
+        remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "-")
+        target_path = request.full_path.rstrip("?") if request.query_string else request.path
+        app.logger.info('%s - "%s %s" %s', remote_ip, request.method, target_path, response.status_code)
         return response
 
     @app.get("/api/v1/health")

@@ -1,9 +1,7 @@
-# พารามิเตอร์ที่ผู้ใช้ปรับได้เมื่อเรียกสคริปต์
 param(
-    [string]$BaseUrl = "http://127.0.0.1:5000"
+    [string]$BaseUrl = "http://127.0.0.1:5000",
+    [switch]$RequireAi
 )
-
-# หยุดเมื่อเกิดข้อผิดพลาดและหาตำแหน่งไฟล์จากที่ตั้งสคริปต์
 
 $ErrorActionPreference = "Stop"
 # อ่านสถานะรวมและสถานะบริการที่ Backend พึ่งพา
@@ -26,5 +24,9 @@ if ($health.status -ne "ok") {
 }
 # แจ้งแยกกรณี Backend ติดต่อได้แต่ AI ไม่พร้อม
 if ($health.dependencies.ai_service -ne "ok") {
-    throw "Backend is reachable, but the AI service is unavailable."
+    if ($RequireAi) {
+        throw "Backend is reachable, but the AI service is unavailable."
+    } else {
+        Write-Warning "Backend is online, but AI Engine is currently offline (unavailable)."
+    }
 }

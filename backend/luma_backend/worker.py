@@ -100,6 +100,16 @@ def process_job(app: Flask, job_id: str) -> None:
             if not response.content or "image/" not in response.headers.get("Content-Type", ""):
                 raise RuntimeError("AI service did not return a valid image response.")
 
+            import io
+            from PIL import Image
+            try:
+                with Image.open(io.BytesIO(response.content)) as img:
+                    if img.format != "PNG":
+                        raise RuntimeError("AI service result must be a PNG image.")
+                    img.verify()
+            except Exception as exc:
+                raise RuntimeError(f"Corrupt AI image: {exc}") from exc
+
             result_filename = f"{job.id}.png"
             result_path = Path(app.config["MEDIA_ROOT"]) / result_filename
             result_path.write_bytes(response.content)
