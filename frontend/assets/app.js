@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const API_BASE = window.LUMA_API_BASE || (window.location.port === "8080" ? "http://localhost:5000/api/v1" : "/api/v1");
+const API_BASE = window.LUMA_API_BASE || "/api/v1";
   const TOKEN_KEY = "luma_access_token";
   const state = {
     token: localStorage.getItem(TOKEN_KEY),
