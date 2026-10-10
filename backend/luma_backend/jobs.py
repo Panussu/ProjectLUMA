@@ -272,7 +272,14 @@ def media(filename: str):
 
 
 def send_media_file(filename: str):
-    response = send_from_directory(current_app.config["MEDIA_ROOT"], filename, conditional=True)
+    as_download = request.args.get("download") == "1"
+    response = send_from_directory(
+        current_app.config["MEDIA_ROOT"],
+        filename,
+        conditional=True,
+        as_attachment=as_download,
+        download_name=filename if as_download else None,
+    )
     response.headers["Cache-Control"] = "private, max-age=3600"
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response

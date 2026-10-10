@@ -92,6 +92,28 @@ def test_generate_job_completes_and_media_link_works(
     assert media.data == png_bytes
 
 
+# ทดสอบว่าพารามิเตอร์ download=1 บังคับให้ Browser ดาวน์โหลดไฟล์แทนการเปิดดู
+def test_signed_media_link_can_force_file_download(
+    backend_client, registered_user, png_bytes, monkeypatch
+):
+    monkeypatch.setattr(worker.requests, "post", lambda *args, **kwargs: FakeAiResponse(png_bytes))
+    created = backend_client.post(
+        "/api/v1/jobs/generate",
+        json={"prompt": "a downloadable signed media result"},
+        headers=authorization(registered_user["token"]),
+    )
+    job_id = created.get_json()["job"]["id"]
+    job = backend_client.get(
+        f"/api/v1/jobs/{job_id}", headers=authorization(registered_user["token"])
+    ).get_json()["job"]
+
+    media = backend_client.get(f"{job['result_url']}&download=1")
+
+    assert media.status_code == 200
+    assert media.data == png_bytes
+    assert media.headers["Content-Disposition"].startswith("attachment;")
+
+
 # ทดสอบว่าJWT เจ้าของดาวน์โหลดภาพได้แต่บัญชีอื่นถูกปฏิเสธ
 def test_media_accepts_owner_bearer_token_and_rejects_other_users(
     backend_client, registered_user, png_bytes, monkeypatch
