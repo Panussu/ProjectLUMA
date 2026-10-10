@@ -2,22 +2,26 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import math
+import re
 import secrets
 import uuid
 from pathlib import Path
 
+import requests
 from flask import Blueprint, current_app, jsonify, request, send_from_directory
 from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from PIL import Image, UnidentifiedImageError
 
 from .extensions import db
-from .models import Job
+from .models import Job, JobAIOptions
 from .worker import queue_job
 
 jobs_blueprint = Blueprint("jobs", __name__)
 media_blueprint = Blueprint("media", __name__)
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
+INTEGER_PATTERN = re.compile(r"^[+-]?\d+$")
 
 
 def error_response(code: str, message: str, status: int):
@@ -27,20 +31,78 @@ def error_response(code: str, message: str, status: int):
 def parse_integer(value, name: str, minimum: int, maximum: int) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer.")
-    try:
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and INTEGER_PATTERN.fullmatch(value.strip()):
         parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
+    else:
+        raise ValueError(f"{name} must be an integer.")
     if not minimum <= parsed <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}.")
     return parsed
 
 
 def parse_prompt(value) -> str:
-    prompt = str(value or "").strip()
+    if not isinstance(value, str):
+        raise ValueError("Prompt must be a string.")
+    prompt = value.strip()
     if not 3 <= len(prompt) <= 1000:
         raise ValueError("Prompt must contain between 3 and 1000 characters.")
     return prompt
+
+
+def parse_ai_options(data: dict) -> dict:
+    options: dict = {}
+    for key in ("model", "sampler", "scheduler", "style_preset"):
+        value = data.get(key)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string.")
+        value = value.strip()
+        if len(value) > 255:
+            raise ValueError(f"{key} cannot exceed 255 characters.")
+        if value:
+            options[key] = value
+
+    loras = data.get("loras")
+    if loras not in (None, ""):
+        if isinstance(loras, str):
+            try:
+                loras = json.loads(loras)
+            except ValueError as exc:
+                raise ValueError("loras must be a JSON list.") from exc
+        if not isinstance(loras, list) or len(loras) > 8:
+            raise ValueError("loras must be a list of at most 8 items.")
+        parsed_loras = []
+        for item in loras:
+            if isinstance(item, str):
+                name = item.strip()
+                parsed = name
+            elif isinstance(item, dict):
+                name = str(item.get("name", "")).strip()
+                weight = float(item.get("weight", 1.0))
+                if not math.isfinite(weight) or not 0 <= weight <= 2:
+                    raise ValueError("LoRA weight must be between 0 and 2.")
+                parsed = {"name": name, "weight": weight}
+            else:
+                raise ValueError("loras entries must be strings or objects.")
+            if not name:
+                raise ValueError("LoRA name is required.")
+            parsed_loras.append(parsed)
+        options["loras"] = parsed_loras
+
+    if data.get("cfg_scale") not in (None, ""):
+        cfg_scale = float(data["cfg_scale"])
+        if not math.isfinite(cfg_scale) or not 1 <= cfg_scale <= 30:
+            raise ValueError("cfg_scale must be between 1 and 30.")
+        options["cfg_scale"] = cfg_scale
+
+    if data.get("clip_skip") not in (None, ""):
+        clip_skip = parse_integer(data["clip_skip"], "clip_skip", 1, 12)
+        options["clip_skip"] = clip_skip
+
+    return options
 
 
 def current_user_id() -> int:
@@ -77,19 +139,7 @@ def generate():
             raise ValueError("Width and height must be divisible by 64.")
         steps = parse_integer(data.get("steps", 20), "steps", 1, 150)
         seed = parse_integer(data.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
-        model = str(data.get("model", "")).strip() or None
-        raw_loras = data.get("loras")
-        if isinstance(raw_loras, (list, dict)):
-            loras = json.dumps(raw_loras)
-        elif raw_loras:
-            loras = str(raw_loras).strip()
-        else:
-            loras = None
-        sampler = str(data.get("sampler", "")).strip() or None
-        scheduler = str(data.get("scheduler", "")).strip() or None
-        cfg_scale = float(data["cfg_scale"]) if data.get("cfg_scale") not in (None, "") else None
-        clip_skip = int(data["clip_skip"]) if data.get("clip_skip") not in (None, "") else None
-        style_preset = str(data.get("style_preset", "")).strip() or None
+        ai_options = parse_ai_options(data)
     except ValueError as exc:
         return error_response("validation_error", str(exc), 400)
 
@@ -102,15 +152,16 @@ def generate():
         height=height,
         steps=steps,
         seed=seed,
-        model=model,
-        loras=loras,
-        sampler=sampler,
-        scheduler=scheduler,
-        cfg_scale=cfg_scale,
-        clip_skip=clip_skip,
-        style_preset=style_preset,
+        model=ai_options.get("model"),
+        loras=json.dumps(ai_options["loras"]) if "loras" in ai_options else None,
+        sampler=ai_options.get("sampler"),
+        scheduler=ai_options.get("scheduler"),
+        cfg_scale=ai_options.get("cfg_scale"),
+        clip_skip=ai_options.get("clip_skip"),
+        style_preset=ai_options.get("style_preset"),
     )
     db.session.add(job)
+    db.session.add(JobAIOptions(job=job, request_options=ai_options))
     db.session.commit()
     response = serialized(job)
     queue_job(current_app._get_current_object(), job.id)
@@ -129,14 +180,7 @@ def edit():
         if not 0 <= strength <= 1:
             raise ValueError("Strength must be between 0 and 1.")
         seed = parse_integer(request.form.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
-        model = str(request.form.get("model", "")).strip() or None
-        raw_loras = request.form.get("loras")
-        loras = str(raw_loras).strip() if raw_loras else None
-        sampler = str(request.form.get("sampler", "")).strip() or None
-        scheduler = str(request.form.get("scheduler", "")).strip() or None
-        cfg_scale = float(request.form["cfg_scale"]) if request.form.get("cfg_scale") not in (None, "") else None
-        clip_skip = int(request.form["clip_skip"]) if request.form.get("clip_skip") not in (None, "") else None
-        style_preset = str(request.form.get("style_preset", "")).strip() or None
+        ai_options = parse_ai_options(request.form.to_dict())
 
         image = Image.open(upload.stream)
         image.verify()
@@ -160,15 +204,16 @@ def edit():
         strength=strength,
         seed=seed,
         source_filename=source_filename,
-        model=model,
-        loras=loras,
-        sampler=sampler,
-        scheduler=scheduler,
-        cfg_scale=cfg_scale,
-        clip_skip=clip_skip,
-        style_preset=style_preset,
+        model=ai_options.get("model"),
+        loras=json.dumps(ai_options["loras"]) if "loras" in ai_options else None,
+        sampler=ai_options.get("sampler"),
+        scheduler=ai_options.get("scheduler"),
+        cfg_scale=ai_options.get("cfg_scale"),
+        clip_skip=ai_options.get("clip_skip"),
+        style_preset=ai_options.get("style_preset"),
     )
     db.session.add(job)
+    db.session.add(JobAIOptions(job=job, request_options=ai_options))
     db.session.commit()
     response = serialized(job)
     queue_job(current_app._get_current_object(), job.id)
@@ -196,18 +241,75 @@ def get_job(job_id: str):
     return jsonify({"job": serialized(job)})
 
 
+def ai_headers() -> dict[str, str]:
+    return {"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]}
+
+
+def ai_url(path: str) -> str:
+    return f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}{path}"
+
+
+@jobs_blueprint.get("/progress")
+@jwt_required()
+def overall_progress():
+    include_preview = request.args.get("include_preview", "false")
+    try:
+        response = requests.get(
+            ai_url("/v1/progress"),
+            headers=ai_headers(),
+            params={"include_preview": include_preview},
+            timeout=(current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_READ_TIMEOUT"]),
+        )
+        if response.ok:
+            return jsonify(response.json())
+    except requests.RequestException:
+        current_app.logger.info("AI progress endpoint unavailable", exc_info=True)
+    return jsonify({"status": "unavailable", "active": False, "progress_percent": 0.0})
+
+
+@jobs_blueprint.get("/<job_id>/progress")
+@jwt_required()
+def job_progress(job_id: str):
+    job = db.session.scalar(db.select(Job).where(Job.id == job_id, Job.user_id == current_user_id()))
+    if job is None:
+        return error_response("job_not_found", "The requested job does not exist.", 404)
+    if job.status == "completed":
+        return jsonify({"job_id": job.id, "status": job.status, "progress_percent": 100.0})
+    if job.status == "queued":
+        return jsonify({"job_id": job.id, "status": job.status, "progress_percent": 0.0})
+    if job.status in {"failed", "cancelled", "interrupted"}:
+        return jsonify({"job_id": job.id, "status": job.status, "progress_percent": float(job.progress or 0), "error": job.error})
+
+    data = overall_progress().get_json() or {}
+    data["job_id"] = job.id
+    data["status"] = job.status
+    data.setdefault("progress_percent", float(job.progress or 0))
+    return jsonify(data)
+
+
 @jobs_blueprint.post("/<job_id>/cancel")
 @jwt_required()
 def cancel_job(job_id: str):
     job = db.session.scalar(db.select(Job).where(Job.id == job_id, Job.user_id == current_user_id()))
     if job is None:
         return error_response("job_not_found", "The requested job does not exist.", 404)
-    job.status = "interrupted"
-    job.error = "Generation interrupted by user."
+    if job.status in {"cancelled", "completed", "failed", "interrupted"}:
+        return error_response("job_not_cancellable", "This job cannot be cancelled.", 409)
+    if job.status == "processing":
+        try:
+            requests.post(
+                ai_url("/v1/interrupt"),
+                headers=ai_headers(),
+                timeout=(current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_METADATA_TIMEOUT"]),
+            )
+        except requests.RequestException:
+            current_app.logger.info("AI interrupt endpoint unavailable", exc_info=True)
+    job.status = "cancelled"
+    job.error = "Generation cancelled by user."
     job.progress = 0
     job.completed_at = datetime.now(timezone.utc)
     db.session.commit()
-    return jsonify({"job": serialized(job), "status": "interrupted"})
+    return jsonify({"job": serialized(job), "status": "cancelled"})
 
 
 @media_blueprint.get("/<path:filename>")

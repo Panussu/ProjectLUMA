@@ -60,11 +60,26 @@ class Job(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
     completed_at = db.Column(db.DateTime(timezone=True))
     user = db.relationship("User", back_populates="jobs")
+    ai_options = db.relationship("JobAIOptions", back_populates="job", uselist=False, cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def to_dict(self, result_url: str | None = None) -> dict:
+        request_options = self.ai_options.request_options if self.ai_options else {
+            key: value
+            for key, value in {
+                "model": self.model,
+                "loras": self.loras,
+                "sampler": self.sampler,
+                "scheduler": self.scheduler,
+                "cfg_scale": self.cfg_scale,
+                "clip_skip": self.clip_skip,
+                "style_preset": self.style_preset,
+            }.items()
+            if value not in (None, "", [])
+        }
+        result_options = self.ai_options.result_options if self.ai_options else {}
         return {
             "id": self.id,
             "type": self.type,
@@ -90,6 +105,38 @@ class Job(db.Model):
             "completed_at": self.completed_at.isoformat().replace("+00:00", "Z") if self.completed_at else None,
             "result_url": result_url,
             "error": self.error,
+            "ai_options": request_options or {},
+            "ai_result": result_options or {},
+        }
+
+
+class JobAIOptions(db.Model):
+    job_id = db.Column(db.String(36), db.ForeignKey("job.id"), primary_key=True)
+    request_options = db.Column(db.JSON, nullable=False, default=dict)
+    result_options = db.Column(db.JSON, nullable=False, default=dict)
+    job = db.relationship("Job", back_populates="ai_options")
+
+
+class FavoritePrompt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    title = db.Column(db.String(100), nullable=False)
+    prompt = db.Column(db.Text, nullable=False)
+    negative_prompt = db.Column(db.Text, nullable=False, default="")
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "prompt": self.prompt,
+            "negative_prompt": self.negative_prompt,
+            "tags": self.tags or [],
+            "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
+            "updated_at": self.updated_at.isoformat().replace("+00:00", "Z"),
         }
 
 

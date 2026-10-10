@@ -14,6 +14,7 @@ class Config:
         self.SECRET_KEY = os.getenv("SECRET_KEY", "development-secret-change-me")
         self.JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "development-jwt-secret-change-me")
         self.JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=int(os.getenv("JWT_HOURS", "8")))
+        self.DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "development")
         self.SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", database_default)
         self.SQLALCHEMY_TRACK_MODIFICATIONS = False
         self.MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(16 * 1024 * 1024)))
@@ -23,6 +24,10 @@ class Config:
         self.AI_SERVICE_TOKEN = os.getenv("AI_SERVICE_TOKEN", "change-me-in-production")
         self.AI_CONNECT_TIMEOUT = float(os.getenv("AI_CONNECT_TIMEOUT", "5"))
         self.AI_READ_TIMEOUT = float(os.getenv("AI_READ_TIMEOUT", "180"))
+        self.AI_METADATA_TIMEOUT = float(os.getenv("AI_METADATA_TIMEOUT", "10"))
+        self.AI_QUEUE_MAX_RETRIES = int(os.getenv("AI_QUEUE_MAX_RETRIES", "0"))
+        self.AI_QUEUE_RETRY_DELAY = float(os.getenv("AI_QUEUE_RETRY_DELAY", "1"))
         self.MEDIA_TOKEN_MAX_AGE = int(os.getenv("MEDIA_TOKEN_MAX_AGE", "3600"))
         self.CORS_ORIGINS = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",") if item.strip()]
+        self.RECOVER_JOBS_ON_STARTUP = os.getenv("RECOVER_JOBS_ON_STARTUP", "0") == "1"
 

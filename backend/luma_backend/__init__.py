@@ -3,21 +3,81 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 
+from .ai_catalog import ai_catalog_blueprint
 from .ai_proxy import ai_proxy_blueprint
 from .auth import auth_blueprint
 from .config import Config
 from .extensions import db
 from .jobs import jobs_blueprint, media_blueprint
+from .prompts import prompts_blueprint
 
 jwt = JWTManager()
+
+
+def validate_deployment_config(app: Flask) -> None:
+    mode = str(app.config.get("DEPLOYMENT_MODE", "development")).lower()
+    if mode not in {"vlan", "production"}:
+        return
+
+    unsafe: list[str] = []
+    placeholders = ("change-me", "replace-with", "development", "example", "placeholder")
+    for key in ("SECRET_KEY", "JWT_SECRET_KEY", "AI_SERVICE_TOKEN"):
+        value = str(app.config.get(key, ""))
+        if len(value) < 32 or any(marker in value.lower() for marker in placeholders):
+            unsafe.append(key)
+
+    if app.config.get("SECRET_KEY") == app.config.get("JWT_SECRET_KEY"):
+        unsafe.append("SECRET_KEY/JWT_SECRET_KEY")
+
+    ai_url = str(app.config.get("AI_SERVICE_URL", ""))
+    parsed = urlparse(ai_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        unsafe.append("AI_SERVICE_URL")
+    if parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        unsafe.append("AI_SERVICE_URL")
+
+    cors_origins = app.config.get("CORS_ORIGINS") or []
+    if "*" in cors_origins:
+        unsafe.append("CORS_ORIGINS")
+
+    if app.config.get("DEBUG") or app.config.get("FLASK_DEBUG"):
+        unsafe.append("DEBUG")
+
+    if unsafe:
+        unique = ", ".join(dict.fromkeys(unsafe))
+        raise RuntimeError(f"Unsafe backend configuration for {mode}: {unique}")
+
+
+def recover_jobs_on_startup(app: Flask) -> None:
+    if not app.config.get("RECOVER_JOBS_ON_STARTUP"):
+        return
+
+    from . import worker
+    from .models import Job
+
+    interrupted = db.session.scalars(db.select(Job).where(Job.status == "processing")).all()
+    now = datetime.now(timezone.utc)
+    for job in interrupted:
+        job.status = "failed"
+        job.progress = 0
+        job.error = "Backend restarted before this job completed. Please submit it again."
+        job.completed_at = now
+    if interrupted:
+        db.session.commit()
+
+    queued = db.session.scalars(db.select(Job).where(Job.status == "queued")).all()
+    for job in queued:
+        worker.queue_job(app, job.id)
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
@@ -25,6 +85,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app.config.from_object(Config())
     if test_config:
         app.config.update(test_config)
+    validate_deployment_config(app)
 
     Path(app.config["MEDIA_ROOT"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["UPLOAD_ROOT"]).mkdir(parents=True, exist_ok=True)
@@ -68,6 +129,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     app.register_blueprint(auth_blueprint, url_prefix="/api/v1/auth")
     app.register_blueprint(jobs_blueprint, url_prefix="/api/v1/jobs")
+    app.register_blueprint(prompts_blueprint, url_prefix="/api/v1/prompts")
+    app.register_blueprint(ai_catalog_blueprint, url_prefix="/api/v1/ai")
     app.register_blueprint(ai_proxy_blueprint, url_prefix="/api/v1")
     app.register_blueprint(media_blueprint, url_prefix="/media")
 
@@ -88,6 +151,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 db.session.commit()
             except Exception:
                 db.session.rollback()
+        recover_jobs_on_startup(app)
 
     @app.before_request
     def attach_request_id():

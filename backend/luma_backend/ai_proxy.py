@@ -8,6 +8,8 @@ import requests
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from .extensions import db
+from . import ai_catalog
+from . import filters
 from .models import Job
 
 # สร้าง Blueprint สำหรับ AI Proxy
@@ -78,13 +80,13 @@ def forward_ai_request(
 @ai_proxy_blueprint.get("/models")
 def get_models():
     """ดึงรายชื่อโมเดล Checkpoints ที่มีอยู่ในเครื่อง AI Engine."""
-    return forward_ai_request("GET", "/v1/models")
+    return ai_catalog.forward_engine_json("models")
 
 
 @ai_proxy_blueprint.get("/loras")
 def get_loras():
     """ดึงรายชื่อ LoRA พร้อม Trigger Words ที่ติดตั้งใน AI Engine."""
-    return forward_ai_request("GET", "/v1/loras")
+    return ai_catalog.forward_engine_json("loras")
 
 
 @ai_proxy_blueprint.get("/preview/model/<path:name>")
@@ -104,31 +106,31 @@ def preview_lora(name: str):
 @ai_proxy_blueprint.get("/samplers")
 def get_samplers():
     """ดึงรายชื่อ Sampler ทั้งหมดที่รองรับ (Euler, DPM++ 2M Karras ฯลฯ)."""
-    return forward_ai_request("GET", "/v1/samplers")
+    return ai_catalog.forward_engine_json("samplers")
 
 
 @ai_proxy_blueprint.get("/schedulers")
 def get_schedulers():
     """ดึงรายชื่อ Noise Schedulers (Karras, Exponential, Automatic ฯลฯ)."""
-    return forward_ai_request("GET", "/v1/schedulers")
+    return ai_catalog.forward_engine_json("schedulers")
 
 
 @ai_proxy_blueprint.get("/styles")
 def get_styles():
     """ดึง 10 ชุด Curated Style Presets สำหรับปรับแต่ง Prompt อัตโนมัติ."""
-    return forward_ai_request("GET", "/v1/styles")
+    return ai_catalog.forward_engine_json("styles")
 
 
 @ai_proxy_blueprint.get("/styles/<style_id>")
 def get_style(style_id: str):
     """ดึงข้อมูล Style Preset เฉพาะเจาะจงตาม ID."""
-    return forward_ai_request("GET", f"/v1/styles/{style_id}")
+    return ai_catalog.forward_engine_json(f"styles/{style_id}")
 
 
 @ai_proxy_blueprint.get("/settings")
 def get_settings():
     """ดึงค่าคอนฟิกเริ่มต้น, ช่วงค่าที่อนุญาต, อัตราส่วนภาพ และ Presets คุณภาพ."""
-    return forward_ai_request("GET", "/v1/settings")
+    return ai_catalog.forward_engine_json("settings")
 
 
 # ==================== 3. Image Processing & Filters (API Workshop) ====================
@@ -136,7 +138,7 @@ def get_settings():
 @ai_proxy_blueprint.get("/filters")
 def get_filters():
     """ดึงรายชื่อฟิลเตอร์ประมวลผลภาพ (Grayscale, Edge Detection, Blur, Invert)."""
-    return forward_ai_request("GET", "/v1/filters")
+    return jsonify({"operations": filters.FILTERS})
 
 
 @ai_proxy_blueprint.post("/process")
@@ -147,9 +149,14 @@ def process_filter_image():
         return jsonify({"error": {"code": "validation_error", "message": "An image file is required."}}), 400
 
     operation = request.form.get("operation", "grayscale")
-    files = {"file": (upload.filename, upload.stream, upload.content_type or "image/png")}
-    data = {"operation": operation}
-    return forward_ai_request("POST", "/process", files=files, data=data, stream=True)
+    try:
+        image = filters.open_image(upload.stream)
+        output = filters.apply_filter(image, operation)
+    except Exception as exc:
+        return jsonify({"error": {"code": "validation_error", "message": str(exc)}}), 400
+    response = Response(filters.png_bytes(output), content_type="image/png")
+    response.headers["X-Image-Operation"] = operation
+    return response
 
 
 # ==================== 4. Upscalers & Queue Status ====================
@@ -157,13 +164,13 @@ def process_filter_image():
 @ai_proxy_blueprint.get("/upscalers")
 def get_upscalers():
     """ดึงรายชื่อ AI Upscalers ที่ระบบรองรับ (R-ESRGAN 4x+, SwinIR 4x ฯลฯ)."""
-    return forward_ai_request("GET", "/v1/upscalers")
+    return jsonify({"upscalers": filters.UPSCALERS, "default": "Lanczos"})
 
 
 @ai_proxy_blueprint.get("/queue/status")
 def get_queue_status():
     """ดึงสถานะคิวการทำงานของ GPU และจำนวนงานที่กำลังประมวลผล."""
-    return forward_ai_request("GET", "/v1/queue/status")
+    return ai_catalog.forward_engine_json("queue/status")
 
 
 @ai_proxy_blueprint.get("/progress")
@@ -225,30 +232,60 @@ def skip_generation():
 @ai_proxy_blueprint.post("/upscale")
 def upscale_image():
     """ส่งต่อคำขอขยายความละเอียดภาพ (Super Resolution) ด้วย AI Upscaler."""
-    upload = request.files.get("image")
+    upload = request.files.get("image") or request.files.get("file")
     if not upload or not upload.filename:
         return jsonify({"error": {"code": "validation_error", "message": "An image file is required."}}), 400
 
-    files = {"image": (upload.filename, upload.stream, upload.content_type or "image/png")}
-    data = {}
-    if "scale_factor" in request.form:
-        data["scale_factor"] = request.form.get("scale_factor")
-    if "upscaler" in request.form:
-        data["upscaler"] = request.form.get("upscaler")
-    return forward_ai_request("POST", "/v1/upscale", files=files, data=data, stream=True)
+    try:
+        scale_factor = float(request.form.get("scale_factor", "2.0"))
+        image = filters.open_image(upload.stream)
+        output = filters.upscale(image, scale_factor)
+    except Exception as exc:
+        return jsonify({"error": {"code": "validation_error", "message": str(exc)}}), 400
+    response = Response(filters.png_bytes(output), content_type="image/png")
+    response.headers["X-LUMA-Scale-Factor"] = str(scale_factor)
+    return response
+
+
+@ai_proxy_blueprint.get("/interrogate/models")
+def interrogate_models():
+    return jsonify(
+        {
+            "models": [
+                {"id": "deepdanbooru", "name": "DeepDanbooru"},
+                {"id": "clip", "name": "CLIP"},
+            ]
+        }
+    )
 
 
 @ai_proxy_blueprint.post("/interrogate")
 def interrogate_image():
     """ส่งต่อคำขอถอดคำบรรยายหรือแท็กภาพ (DeepDanbooru / CLIP Interrogate)."""
-    upload = request.files.get("image")
+    upload = request.files.get("image") or request.files.get("file")
     if not upload or not upload.filename:
         return jsonify({"error": {"code": "validation_error", "message": "An image file is required."}}), 400
 
     model = request.form.get("model", "deepdanbooru")
-    files = {"image": (upload.filename, upload.stream, upload.content_type or "image/png")}
+    if model not in {"deepdanbooru", "clip"}:
+        return jsonify({"error": {"code": "validation_error", "message": "Unsupported interrogate model."}}), 400
+    content = upload.read()
+    files = {"image": (upload.filename, content, upload.content_type or "image/png")}
     data = {"model": model}
-    return forward_ai_request("POST", "/v1/interrogate", files=files, data=data)
+    try:
+        resp = filters.requests.post(
+            f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}/v1/interrogate",
+            headers={"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]},
+            files=files,
+            data=data,
+            timeout=(current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_METADATA_TIMEOUT"]),
+        )
+        if resp.ok:
+            return jsonify(resp.json())
+    except requests.RequestException:
+        current_app.logger.info("AI interrogate endpoint unavailable", exc_info=True)
+    image = filters.open_image(__import__("io").BytesIO(content))
+    return jsonify(filters.procedural_interrogate(image, model))
 
 
 # ==================== 6. PNG Info & Danbooru Tag Autocomplete ====================
@@ -270,5 +307,3 @@ def get_tags():
     q = request.args.get("q", "")
     limit = request.args.get("limit", "20")
     return forward_ai_request("GET", "/v1/tags", params={"q": q, "limit": limit})
-
-
