@@ -26,6 +26,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     isGenerating: false,
     progressPollTimer: null,
     activeJobId: null,
+    editPreviewObjectUrl: null,
   };
 
   const $ = (selector) => document.querySelector(selector);
@@ -1057,6 +1058,71 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     }
   }
 
+  function setEditImagePreview(fileOrUrl) {
+    if (state.editPreviewObjectUrl) {
+      URL.revokeObjectURL(state.editPreviewObjectUrl);
+      state.editPreviewObjectUrl = null;
+    }
+
+    const uploadZone = $("#editUploadZone");
+    const uploadPrompt = $("#editUploadPrompt");
+    const previewContainer = $("#editPreviewContainer");
+    const previewImg = $("#editImagePreview");
+    const fileNameEl = $("#fileName");
+    const changeHint = $("#editChangeHint");
+
+    if (!fileOrUrl) {
+      const fileInput = $("#editImage");
+      if (fileInput) fileInput.value = "";
+      if (previewImg) {
+        previewImg.src = "";
+        previewImg.style.display = "none";
+      }
+      if (fileNameEl) fileNameEl.textContent = "";
+      uploadPrompt?.classList.remove("d-none");
+      previewContainer?.classList.add("d-none");
+      uploadZone?.classList.remove("has-preview");
+      changeHint?.classList.add("d-none");
+      return;
+    }
+
+    let src = "";
+    let name = "";
+
+    if (typeof fileOrUrl === "string") {
+      src = fileOrUrl;
+      name = fileOrUrl.split("/").pop()?.split("?")[0] || "image.png";
+    } else if (fileOrUrl instanceof Blob || fileOrUrl instanceof File) {
+      name = fileOrUrl.name || "image.png";
+      try {
+        src = URL.createObjectURL(fileOrUrl);
+        state.editPreviewObjectUrl = src;
+      } catch {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (previewImg) {
+            previewImg.src = e.target.result;
+            previewImg.style.display = "block";
+          }
+        };
+        reader.readAsDataURL(fileOrUrl);
+      }
+    }
+
+    if (src && previewImg) {
+      previewImg.src = src;
+      previewImg.style.display = "block";
+    }
+    if (fileNameEl) {
+      fileNameEl.textContent = name;
+    }
+
+    uploadPrompt?.classList.add("d-none");
+    previewContainer?.classList.remove("d-none");
+    uploadZone?.classList.add("has-preview");
+    changeHint?.classList.remove("d-none");
+  }
+
   async function submitEdit(event) {
     event.preventDefault();
     // If edit is active, clicking the button again INTERRUPTS the process!
@@ -1296,6 +1362,10 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     $("#editForm")?.classList.toggle("d-none", !isEdit);
     $("#pngInfoForm")?.classList.toggle("d-none", !isPngInfo);
 
+    if (isEdit && $("#editImage")?.files?.[0] && !state.editPreviewObjectUrl) {
+      setEditImagePreview($("#editImage").files[0]);
+    }
+
     // Toggle right-hand image panel
     const pngRight = $("#pngInfoResultView");
     const emptyRes = $("#emptyResult");
@@ -1456,9 +1526,9 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       const dt = new DataTransfer();
       dt.items.add(state.pngInfoData.file);
       $("#editImage").files = dt.files;
-      $("#fileName").textContent = state.pngInfoData.file.name;
+      setEditImagePreview(state.pngInfoData.file);
     } catch {
-      // Fallback
+      setEditImagePreview(state.pngInfoData.file);
     }
 
     if (state.pngInfoData.parsed?.prompt) {
@@ -2015,7 +2085,73 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     if (counter) counter.textContent = `${event.target.value.length} / 1000`;
   });
   $("#strength").addEventListener("input", (event) => { $("#strengthValue").textContent = `${Math.round(Number(event.target.value) * 100)}%`; });
-  $("#editImage").addEventListener("change", (event) => { $("#fileName").textContent = event.target.files[0]?.name || ""; });
+
+  $("#editImage")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) setEditImagePreview(file);
+  });
+
+  $("#editImage")?.addEventListener("input", (event) => {
+    const file = event.target.files?.[0];
+    if (file) setEditImagePreview(file);
+  });
+
+  $("#editClearBtn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setEditImagePreview(null);
+  });
+
+  const editUploadZone = $("#editUploadZone");
+  editUploadZone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    editUploadZone.classList.add("dragging");
+  });
+  editUploadZone?.addEventListener("dragleave", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    editUploadZone.classList.remove("dragging");
+  });
+  editUploadZone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    editUploadZone.classList.remove("dragging");
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(files[0]);
+        $("#editImage").files = dt.files;
+      } catch {
+        // Fallback
+      }
+      setEditImagePreview(files[0]);
+    }
+  });
+
+  document.addEventListener("paste", (event) => {
+    if ($("#editForm")?.classList.contains("d-none")) return;
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          try {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            $("#editImage").files = dt.files;
+          } catch {
+            // Fallback
+          }
+          setEditImagePreview(file);
+          showToast("Image pasted from clipboard!");
+          break;
+        }
+      }
+    }
+  });
 
   // Initial loads
   checkHealth();
@@ -2026,5 +2162,8 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
   loadSchedulers();
   loadUpscalers();
   loadDanbooruTags();
+  if ($("#editImage")?.files?.[0]) {
+    setEditImagePreview($("#editImage").files[0]);
+  }
   setInterval(checkHealth, 30000);
 })();
