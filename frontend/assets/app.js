@@ -851,6 +851,30 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     return path;
   }
 
+  function getDownloadUrl(url) {
+    if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
+      return url;
+    }
+
+    try {
+      const parsedUrl = new URL(url, window.location.href);
+
+      if (!parsedUrl.pathname.startsWith("/media/")) {
+        return url;
+      }
+
+      parsedUrl.searchParams.set("download", "1");
+
+      if (/^https?:\/\//i.test(url)) {
+        return parsedUrl.toString();
+      }
+
+      return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+    } catch {
+      return url;
+    }
+  }
+
   function stopPolling() {
     if (state.pollTimer) {
       clearInterval(state.pollTimer);
@@ -882,7 +906,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
     $("#resultImage").src = state.activeImageUrl;
     $("#resultPrompt").textContent = job.prompt;
-    $("#downloadButton").href = state.activeImageUrl;
+    $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
     $("#downloadButton").download = `luma-${job.id.slice(0, 8)}.png`;
     loadJobs();
   }
@@ -1082,7 +1106,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
     if (operation === "original") {
       $("#resultImage").src = state.activeImageUrl;
-      $("#downloadButton").href = state.activeImageUrl;
+      $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-original.png`;
       return;
     }
@@ -1090,7 +1114,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     // Fast return from memory cache if already processed
     if (state.filterCache[operation]) {
       $("#resultImage").src = state.filterCache[operation];
-      $("#downloadButton").href = state.filterCache[operation];
+      $("#downloadButton").href = getDownloadUrl(state.filterCache[operation]);
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${operation}.png`;
       return;
     }
@@ -1117,7 +1141,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
       if (state.currentFilter === operation) {
         $("#resultImage").src = filteredUrl;
-        $("#downloadButton").href = filteredUrl;
+        $("#downloadButton").href = getDownloadUrl(filteredUrl);
         $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${operation}.png`;
       }
       showToast(`Applied ${operation} filter.`);
@@ -1129,6 +1153,8 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       });
       state.currentFilter = "original";
       $("#resultImage").src = state.activeImageUrl;
+      $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
+      $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-original.png`;
     } finally {
       if (overlay) overlay.classList.add("d-none");
     }
@@ -1166,7 +1192,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       const upscaledUrl = URL.createObjectURL(upscaledBlob);
       state.filterCache[`upscale_${scaleFactor}x_${upscaler}`] = upscaledUrl;
       $("#resultImage").src = upscaledUrl;
-      $("#downloadButton").href = upscaledUrl;
+      $("#downloadButton").href = getDownloadUrl(upscaledUrl);
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${scaleFactor}x.png`;
       showToast(`Upscaled ${scaleFactor}x with ${upscaler} successfully!`);
     } catch (err) {
