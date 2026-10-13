@@ -32,10 +32,11 @@ def search_tags(query: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Search tags by prefix or substring, returning formatted tag objects."""
     all_tags = load_tags()
     q = query.strip().lower().replace(" ", "_")
+    safe_limit = max(1, min(int(limit), 100))
 
     if not q:
         # Return top tags
-        selected = all_tags[:limit]
+        selected = all_tags[:safe_limit]
     else:
         # 1. Prefix matches first
         prefix_matches = []
@@ -47,12 +48,12 @@ def search_tags(query: str = "", limit: int = 20) -> list[dict[str, Any]]:
 
             if tag_name.startswith(q):
                 prefix_matches.append(item)
-                if len(prefix_matches) >= limit:
+                if len(prefix_matches) >= safe_limit:
                     break
             elif q in tag_name or (aliases and q in aliases.lower()):
                 substring_matches.append(item)
 
-        selected = (prefix_matches + substring_matches)[:limit]
+        selected = (prefix_matches + substring_matches)[:safe_limit]
 
     return [
         {

@@ -1011,9 +1011,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
 
         try:
             with Image.open(io.BytesIO(file_bytes)) as img:
-                raw_params = img.info.get("parameters") or img.text.get("parameters") or ""
+                info_dict = getattr(img, "info", {}) or {}
+                text_dict = getattr(img, "text", {}) or {}
+                raw_params = info_dict.get("parameters") or text_dict.get("parameters") or ""
                 if not raw_params:
-                    for k, v in img.info.items():
+                    for k, v in info_dict.items():
                         if isinstance(v, str) and ("Steps:" in v or "Negative prompt:" in v):
                             raw_params = v
                             break
@@ -1027,7 +1029,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                     "width": img.width,
                     "height": img.height,
                 }
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
+        except (UnidentifiedImageError, OSError, ValueError, AttributeError) as exc:
             raise ApiError("validation_error", f"Could not read image metadata: {exc}", 400) from exc
 
     # ค้นหาแท็ก Danbooru สำหรับระบบ Tag Auto-Complete
@@ -1035,7 +1037,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
     def get_tags_endpoint(q: str = "", limit: int = 20) -> dict[str, Any]:
         """Search Danbooru tag suggestions for prompt autocomplete."""
         query = str(q or "").strip().lower()
-        results = search_tags(query, limit=min(limit, 50))
+        safe_limit = max(1, min(int(limit), 50))
+        results = search_tags(query, limit=safe_limit)
         return {"tags": results, "count": len(results), "query": query}
 
     return app
