@@ -84,7 +84,7 @@ def test_edit_returns_png(ai_client, png_bytes):
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
-    assert Image.open(io.BytesIO(response.content)).size == (320, 320)
+    assert Image.open(io.BytesIO(response.content)).size == Image.open(io.BytesIO(png_bytes)).size
 
 
 # สร้างค่ากำหนด Forge จำลองเพื่อทดสอบสัญญาการเรียก API
