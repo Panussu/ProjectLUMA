@@ -1,367 +1,245 @@
-# บริการ FastAPI เชื่อม Forge และ provider ภาพทดสอบ
-"""Private LUMA image service with WebUI Forge and development providers."""
+# บริการ FastAPI เชื่อม Forge และ provider ภาพทดสอบ (LUMA AI Engine Entry Point)
+"""Private LUMA image service with WebUI Forge and development providers.
+
+This module acts as the FastAPI application entry point, routing requests to
+modular services:
+- exceptions: Custom API and provider exceptions
+- queue_manager: Thread-safe GPU concurrency and queue manager
+- validators: Request validation models and parsing utilities
+- styles: Curated style presets and prompt enhancement
+- forge_client: WebUI Forge API integration
+- scanner: Model/LoRA filesystem and API scanner and catalog presets
+- filters: Image processing filter algorithms (ITU-R BT.601, Laplacian, Gaussian blur, invert)
+- dev_provider: Procedural development image generator and simulator
+"""
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import io
 import json
 import logging
 import os
-import random
-import textwrap
+import sys
+import time
+from pathlib import Path
 from typing import Annotated, Any
+
+# Ensure ai-engine folder is in sys.path for both package and direct/spec loading
+_AI_ENGINE_DIR = str(Path(__file__).resolve().parent)
+if _AI_ENGINE_DIR not in sys.path:
+    sys.path.insert(0, _AI_ENGINE_DIR)
 
 import requests
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
-from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, field_validator
+from fastapi.responses import FileResponse, JSONResponse, Response
+from PIL import Image, UnidentifiedImageError
+from PIL.PngImagePlugin import PngInfo
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# โหลดค่าจาก .env ก่อนสร้างแอปหรืออ่าน environment
+try:
+    from png_parser import parse_png_parameters
+except ImportError:
+    from .png_parser import parse_png_parameters
 
+try:
+    from tag_service import search_tags
+except ImportError:
+    from .tag_service import search_tags
+
+# โหลดค่าจาก .env ก่อนสร้างแอปหรืออ่าน environment
 load_dotenv()
 
-MAX_DIMENSION = 1024
-MIN_DIMENSION = 256
-MAX_PROMPT_LENGTH = 1000
+# นำเข้าโมดูลที่แยกย่อยและ Re-export สำหรับ backwards compatibility
+try:
+    from exceptions import ApiError, ProviderError, ProviderUnavailable
+except ImportError:
+    from .exceptions import ApiError, ProviderError, ProviderUnavailable
 
+try:
+    from queue_manager import GenerationQueueManager
+except ImportError:
+    from .queue_manager import GenerationQueueManager
 
-# ข้อผิดพลาดจากคำตอบของบริการสร้างภาพ
-class ProviderError(RuntimeError):
-    """The configured image provider returned an invalid response."""
-
-
-# ข้อผิดพลาดเมื่อไม่สามารถเชื่อมต่อบริการสร้างภาพได้
-class ProviderUnavailable(ProviderError):
-    """The configured image provider could not be reached."""
-
-
-# ข้อผิดพลาดที่กำหนด code ข้อความ และ HTTP status สำหรับ API ภายใน
-class ApiError(RuntimeError):
-    """A stable error response returned by the private LUMA API."""
-
-    # กำหนดค่าเริ่มต้นของออบเจ็กต์จากพารามิเตอร์หรือค่ากำหนดที่ใช้ในคลาสนี้
-    def __init__(self, code: str, message: str, status_code: int):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-
-
-# จัดรูปข้อผิดพลาดให้มี code และ message พร้อมรหัสสถานะ HTTP
-def error_response(code: str, message: str, status: int) -> JSONResponse:
-    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
-
-
-# แปลงและตรวจค่าตัวเลขกับช่วงที่อนุญาตก่อนนำไปใช้งาน
-def parse_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer.")
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
-    if not minimum <= parsed <= maximum:
-        raise ValueError(f"{name} must be between {minimum} and {maximum}.")
-    return parsed
-
-
-# เตรียมข้อความคำสั่งและตรวจความยาวก่อนส่งเข้ากระบวนการภาพ
-def parse_prompt(value: Any) -> str:
-    prompt = str(value or "").strip()
-    if not 3 <= len(prompt) <= MAX_PROMPT_LENGTH:
-        raise ValueError("Prompt must contain between 3 and 1000 characters.")
-    return prompt
-
-
-# ใช้ seed ที่ส่งมา หรือคำนวณจากแฮช prompt เมื่อไม่ได้ระบุ
-def prompt_seed(prompt: str, supplied_seed: Any = None) -> int:
-    if supplied_seed not in (None, ""):
-        return parse_integer(supplied_seed, "seed", 0, 4_294_967_295)
-    digest = hashlib.sha256(prompt.encode("utf-8")).digest()
-    return int.from_bytes(digest[:4], "big")
-
-
-# โครงสร้างคำขอสร้างภาพและกฎตรวจข้อมูลก่อนเข้า endpoint
-class GenerateRequest(BaseModel):
-    """Validated request body for image generation."""
-
-    prompt: str
-    negative_prompt: str = ""
-    width: int = 512
-    height: int = 512
-    seed: int | None = None
-    steps: int = 20
-
-    # ตรวจ prompt ผ่านกฎกลางก่อนสร้างโมเดลคำขอ
-    @field_validator("prompt", mode="before")
-    @classmethod
-    def validate_prompt(cls, value: Any) -> str:
-        return parse_prompt(value)
-
-    # เตรียม negative prompt และจำกัดความยาว
-    @field_validator("negative_prompt", mode="before")
-    @classmethod
-    def validate_negative_prompt(cls, value: Any) -> str:
-        negative_prompt = str(value or "").strip()
-        if len(negative_prompt) > MAX_PROMPT_LENGTH:
-            raise ValueError("Negative prompt cannot exceed 1000 characters.")
-        return negative_prompt
-
-    # ตรวจขนาดภาพให้อยู่ในช่วงและหารด้วย 64 ลงตัว
-    @field_validator("width", "height", mode="before")
-    @classmethod
-    def validate_dimension(cls, value: Any, info) -> int:
-        dimension = parse_integer(value, info.field_name, MIN_DIMENSION, MAX_DIMENSION)
-        if dimension % 64:
-            raise ValueError("Width and height must be divisible by 64.")
-        return dimension
-
-    # อนุญาตค่า seed ว่าง หรือจำนวนเต็มในช่วง 32 บิตไม่ติดลบ
-    @field_validator("seed", mode="before")
-    @classmethod
-    def validate_seed(cls, value: Any) -> int | None:
-        if value in (None, ""):
-            return None
-        return parse_integer(value, "seed", 0, 4_294_967_295)
-
-    # ตรวจจำนวนขั้นการสร้างภาพให้อยู่ระหว่าง 1 ถึง 50
-    @field_validator("steps", mode="before")
-    @classmethod
-    def validate_steps(cls, value: Any) -> int:
-        return parse_integer(value, "steps", 1, 50)
-
-
-# ตรวจชื่อ provider ว่าต้องเรียก Forge หรือใช้ตัวสร้างภาพทดสอบ
-def is_forge_provider(config: dict[str, Any]) -> bool:
-    return str(config["PROVIDER_NAME"]).casefold() in {"forge", "webui-forge", "stable-diffusion-webui-forge"}
-
-
-# สร้างข้อมูล HTTP Basic Auth เมื่อ Forge กำหนดชื่อผู้ใช้ไว้
-def forge_auth(config: dict[str, Any]):
-    username = str(config.get("FORGE_USERNAME", ""))
-    password = str(config.get("FORGE_PASSWORD", ""))
-    return (username, password) if username else None
-
-
-# เรียก Forge ด้วยเวลารอที่กำหนด และแปลงปัญหาเครือข่ายหรือ HTTP เป็นข้อผิดพลาด provider
-def forge_request(config: dict[str, Any], method: str, endpoint: str, **kwargs) -> requests.Response:
-    url = f"{str(config['FORGE_URL']).rstrip('/')}{endpoint}"
-    try:
-        response = requests.request(
-            method,
-            url,
-            auth=forge_auth(config),
-            timeout=(float(config["FORGE_CONNECT_TIMEOUT"]), float(config["FORGE_READ_TIMEOUT"])),
-            **kwargs,
-        )
-    except requests.RequestException as exc:
-        raise ProviderUnavailable(f"WebUI Forge is unavailable at {config['FORGE_URL']}.") from exc
-    # แปลง HTTP error ของบริการปลายทางเป็นข้อผิดพลาดของงาน
-    if not response.ok:
-        try:
-            detail = response.json().get("detail") or response.json().get("error") or response.text
-        except (ValueError, AttributeError):
-            detail = response.text
-        raise ProviderError(f"WebUI Forge returned HTTP {response.status_code}: {str(detail)[:300]}")
-    return response
-
-
-# ประกอบพารามิเตอร์ร่วมของ Forge พร้อม sampler และ checkpoint ที่เลือกได้
-def forge_payload(config: dict[str, Any], prompt: str, seed: int, steps: int) -> dict[str, Any]:
-    # ขอภาพครั้งละหนึ่งภาพและให้ LUMA รับข้อมูลกลับไปจัดเก็บ
-    payload: dict[str, Any] = {
-        "prompt": prompt,
-        "seed": seed,
-        "steps": steps,
-        "cfg_scale": float(config["FORGE_CFG_SCALE"]),
-        "sampler_name": config["FORGE_SAMPLER"],
-        "batch_size": 1,
-        "n_iter": 1,
-        "send_images": True,
-        "save_images": False,
-    }
-    if config.get("FORGE_SCHEDULER"):
-        payload["scheduler"] = config["FORGE_SCHEDULER"]
-    # เปลี่ยน checkpoint สำหรับคำขอนี้และให้ Forge คืนค่าเดิมภายหลัง
-    if config.get("FORGE_CHECKPOINT"):
-        payload["override_settings"] = {"sd_model_checkpoint": config["FORGE_CHECKPOINT"]}
-        payload["override_settings_restore_afterwards"] = True
-    return payload
-
-
-# ถอด Base64 เปิดภาพ และอ่าน seed ที่ Forge รายงานกลับ
-def decode_forge_image(response: requests.Response, fallback_seed: int) -> tuple[Image.Image, int]:
-    try:
-        data = response.json()
-        encoded = data["images"][0]
-        if "," in encoded:
-            encoded = encoded.split(",", 1)[1]
-        # แปลงข้อความ Base64 เป็นไบต์ภาพ ไม่ใช่การถอดรหัสลับ
-        raw_image = base64.b64decode(encoded)
-        image = Image.open(io.BytesIO(raw_image))
-        image.load()
-        returned_seed = fallback_seed
-        info = data.get("info")
-        if isinstance(info, str) and info:
-            parsed_info = json.loads(info)
-            returned_seed = int(parsed_info.get("seed", fallback_seed))
-        return image.convert("RGB"), returned_seed
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError, UnidentifiedImageError) as exc:
-        raise ProviderError("WebUI Forge returned an invalid image response.") from exc
-
-
-# ส่งข้อความและขนาดภาพไปยัง txt2img แล้วถอดภาพผลลัพธ์
-def generate_forge_image(
-    config: dict[str, Any],
-    prompt: str,
-    negative_prompt: str,
-    width: int,
-    height: int,
-    seed: int,
-    steps: int,
-) -> tuple[Image.Image, int]:
-    payload = forge_payload(config, prompt, seed, steps)
-    payload.update({"negative_prompt": negative_prompt, "width": width, "height": height})
-    response = forge_request(config, "POST", "/sdapi/v1/txt2img", json=payload)
-    return decode_forge_image(response, seed)
-
-
-# ปรับแนวและขนาดภาพ เข้ารหัสต้นทาง แล้วเรียก img2img ด้วย denoising_strength
-def edit_forge_image(
-    config: dict[str, Any], source: Image.Image, prompt: str, strength: float, seed: int
-) -> tuple[Image.Image, int]:
-    image = ImageOps.exif_transpose(source).convert("RGB")
-    # ย่อภาพให้อยู่ในขอบเขตขนาดที่กำหนดโดยคงอัตราส่วน
-    image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
-    source_buffer = io.BytesIO()
-    image.save(source_buffer, format="PNG")
-    payload = forge_payload(config, prompt, seed, int(config["FORGE_EDIT_STEPS"]))
-    payload.update(
-        {
-            "negative_prompt": "",
-            "init_images": [base64.b64encode(source_buffer.getvalue()).decode("ascii")],
-            "denoising_strength": strength,
-            "resize_mode": 0,
-            "width": image.width,
-            "height": image.height,
-        }
+try:
+    from validators import (
+        MAX_DIMENSION,
+        MAX_PROMPT_LENGTH,
+        MIN_DIMENSION,
+        GenerateRequest,
+        error_response,
+        parse_integer,
+        parse_prompt,
+        prompt_seed,
+        validation_message,
     )
-    response = forge_request(config, "POST", "/sdapi/v1/img2img", json=payload)
-    return decode_forge_image(response, seed)
-
-
-# สร้างชุดสีจากตัวสุ่มที่กำหนด seed สำหรับภาพทดสอบ
-def _palette(rng: random.Random) -> list[tuple[int, int, int]]:
-    base = rng.randrange(360)
-
-    # แปลงสี HLS เป็น RGB ในช่วง 0 ถึง 255 สำหรับวาดภาพ
-    def hsl(hue: float, saturation: float, lightness: float) -> tuple[int, int, int]:
-        import colorsys
-
-        red, green, blue = colorsys.hls_to_rgb((hue % 360) / 360, lightness, saturation)
-        return int(red * 255), int(green * 255), int(blue * 255)
-
-    return [hsl(base, 0.64, 0.13), hsl(base + 48, 0.72, 0.42), hsl(base + 168, 0.58, 0.55), hsl(base + 290, 0.68, 0.63)]
-
-
-# วาดภาพตัวอย่างด้วย Pillow จาก seed และ prompt โดยไม่ใช้โมเดลที่ผ่านการฝึก
-def generate_development_image(prompt: str, width: int, height: int, seed: int) -> Image.Image:
-    rng = random.Random(seed)
-    palette = _palette(rng)
-    image = Image.new("RGB", (width, height), palette[0])
-    draw = ImageDraw.Draw(image, "RGBA")
-
-    # วาดพื้นหลังไล่สีทีละแถวสำหรับ provider ทดสอบ
-
-    for y in range(height):
-        ratio = y / max(height - 1, 1)
-        start, end = palette[0], palette[1]
-        color = tuple(int(start[channel] * (1 - ratio) + end[channel] * ratio) for channel in range(3))
-        draw.line((0, y, width, y), fill=(*color, 255))
-
-    # วาดวงสีโปร่งใสด้วยตัวสุ่มที่ควบคุม seed
-
-    for _ in range(28):
-        radius = rng.randint(max(18, width // 16), max(40, width // 3))
-        x = rng.randint(-radius, width + radius)
-        y = rng.randint(-radius, height + radius)
-        color = rng.choice(palette[1:])
-        alpha = rng.randint(30, 125)
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(*color, alpha))
-
-    # เพิ่มรูปหลายเหลี่ยมเพื่อสร้างลวดลายของภาพทดสอบ
-
-    for _ in range(10):
-        points = [(rng.randint(0, width), rng.randint(0, height)) for _ in range(rng.randint(3, 7))]
-        color = rng.choice(palette)
-        draw.polygon(points, fill=(*color, rng.randint(18, 55)))
-
-    image = image.filter(ImageFilter.GaussianBlur(radius=max(2, width // 170)))
-    # วาดแผ่นข้อความ prompt และป้ายระบุว่าเป็นภาพจาก provider ทดสอบ
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    margin = max(20, width // 22)
-    box_height = min(height // 4, 150)
-    overlay_draw.rounded_rectangle(
-        (margin, height - box_height - margin, width - margin, height - margin),
-        radius=max(12, width // 40),
-        fill=(6, 7, 15, 155),
-        outline=(255, 255, 255, 35),
-        width=1,
+except ImportError:
+    from .validators import (
+        MAX_DIMENSION,
+        MAX_PROMPT_LENGTH,
+        MIN_DIMENSION,
+        GenerateRequest,
+        error_response,
+        parse_integer,
+        parse_prompt,
+        prompt_seed,
+        validation_message,
     )
-    font = ImageFont.load_default(size=max(12, min(22, width // 28)))
-    wrapped = "\n".join(textwrap.wrap(prompt, width=max(24, width // 15))[:3])
-    overlay_draw.multiline_text((margin * 1.6, height - box_height), wrapped, font=font, fill=(245, 245, 250, 235), spacing=6)
-    overlay_draw.text((margin * 1.6, height - margin * 1.7), f"LUMA DEV PROVIDER  /  SEED {seed}", font=ImageFont.load_default(), fill=(190, 180, 230, 210))
-    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
+try:
+    from styles import (
+        STYLE_PRESETS,
+        apply_style_preset,
+        get_style_preset_by_id,
+    )
+except ImportError:
+    from .styles import (
+        STYLE_PRESETS,
+        apply_style_preset,
+        get_style_preset_by_id,
+    )
 
-# เลือกเอฟเฟกต์พื้นฐานตามคำใน prompt แล้วผสมภาพตาม strength สำหรับทดสอบ
-def edit_development_image(source: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:
-    image = ImageOps.exif_transpose(source).convert("RGB")
-    image.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
-    rng = random.Random(seed)
-    words = prompt.casefold()
+try:
+    from forge_client import (
+        decode_forge_image,
+        edit_forge_image,
+        forge_auth,
+        forge_payload,
+        forge_request,
+        generate_forge_image,
+        interrogate_forge_image,
+        is_forge_provider,
+        upscale_forge_image,
+    )
+except ImportError:
+    from .forge_client import (
+        decode_forge_image,
+        edit_forge_image,
+        forge_auth,
+        forge_payload,
+        forge_request,
+        generate_forge_image,
+        interrogate_forge_image,
+        is_forge_provider,
+        upscale_forge_image,
+    )
 
-    # เลือกเอฟเฟกต์ตามคำภาษาอังกฤษใน prompt ของโหมดทดสอบ
+try:
+    from scanner import (
+        ASPECT_RATIOS,
+        DEFAULT_SAMPLERS,
+        DEFAULT_SCHEDULERS,
+        DEFAULT_UPSCALERS,
+        QUALITY_PRESETS,
+        find_preview_file,
+        get_supported_samplers,
+        get_supported_schedulers,
+        get_supported_upscalers,
+        read_cm_info,
+        scan_installed_loras,
+        scan_installed_models,
+    )
+except ImportError:
+    from .scanner import (
+        ASPECT_RATIOS,
+        DEFAULT_SAMPLERS,
+        DEFAULT_SCHEDULERS,
+        DEFAULT_UPSCALERS,
+        QUALITY_PRESETS,
+        find_preview_file,
+        get_supported_samplers,
+        get_supported_schedulers,
+        get_supported_upscalers,
+        read_cm_info,
+        scan_installed_loras,
+        scan_installed_models,
+    )
 
-    if "grayscale" in words or "black and white" in words or "monochrome" in words:
-        transformed = ImageOps.grayscale(image).convert("RGB")
-    elif "vintage" in words or "sepia" in words:
-        gray = ImageOps.grayscale(image)
-        transformed = ImageOps.colorize(gray, "#281811", "#efc98f")
-    else:
-        transformed = ImageEnhance.Color(image).enhance(1.0 + strength * 0.9)
-        transformed = ImageEnhance.Contrast(transformed).enhance(1.0 + strength * 0.35)
+try:
+    from filters import (
+        ALLOWED_FILTER_CONTENT_TYPES,
+        FILTER_OPERATIONS,
+        process_filter_image,
+    )
+except ImportError:
+    from .filters import (
+        ALLOWED_FILTER_CONTENT_TYPES,
+        FILTER_OPERATIONS,
+        process_filter_image,
+    )
 
-    if "blur" in words or "dream" in words or "soft" in words:
-        transformed = transformed.filter(ImageFilter.GaussianBlur(radius=1 + strength * 4))
-    if "poster" in words or "comic" in words:
-        transformed = ImageOps.posterize(transformed, max(3, 7 - round(strength * 4)))
+try:
+    from dev_provider import (
+        _palette,
+        edit_development_image,
+        generate_development_image,
+        get_live_progress,
+        interrogate_development_image,
+        upscale_development_image,
+    )
+except ImportError:
+    from .dev_provider import (
+        _palette,
+        edit_development_image,
+        generate_development_image,
+        get_live_progress,
+        interrogate_development_image,
+        upscale_development_image,
+    )
 
-    # ผสมสี พื้นผิว และภาพต้นทางตามค่า strength
-
-    tint = Image.new("RGB", transformed.size, _palette(rng)[2])
-    tinted = Image.blend(transformed, tint, strength * 0.18)
-    texture = Image.effect_noise(transformed.size, 10 + strength * 22).convert("RGB")
-    textured = ImageChops.soft_light(tinted, texture)
-    return Image.blend(image, textured, strength)
-
-
-# ดึงข้อความจากข้อผิดพลาดตรวจข้อมูลของ FastAPI ให้ใช้รูปแบบเดียวกับ API
-def validation_message(error: RequestValidationError) -> str:
-    if not error.errors():
-        return "The request is invalid."
-    detail = error.errors()[0]
-    context_error = detail.get("ctx", {}).get("error")
-    message = str(context_error or detail.get("msg") or "The request is invalid.")
-    return message.removeprefix("Value error, ")
+# Re-export all public symbols for backwards compatibility
+__all__ = [
+    "ALLOWED_FILTER_CONTENT_TYPES",
+    "ASPECT_RATIOS",
+    "ApiError",
+    "DEFAULT_SAMPLERS",
+    "DEFAULT_SCHEDULERS",
+    "DEFAULT_UPSCALERS",
+    "FILTER_OPERATIONS",
+    "GenerateRequest",
+    "GenerationQueueManager",
+    "MAX_DIMENSION",
+    "MAX_PROMPT_LENGTH",
+    "MIN_DIMENSION",
+    "ProviderError",
+    "ProviderUnavailable",
+    "QUALITY_PRESETS",
+    "STYLE_PRESETS",
+    "_palette",
+    "app",
+    "apply_style_preset",
+    "create_app",
+    "decode_forge_image",
+    "edit_development_image",
+    "edit_forge_image",
+    "error_response",
+    "find_preview_file",
+    "forge_auth",
+    "forge_payload",
+    "forge_request",
+    "generate_development_image",
+    "generate_forge_image",
+    "get_live_progress",
+    "get_style_preset_by_id",
+    "get_supported_samplers",
+    "get_supported_schedulers",
+    "get_supported_upscalers",
+    "interrogate_development_image",
+    "interrogate_forge_image",
+    "is_forge_provider",
+    "parse_integer",
+    "parse_prompt",
+    "process_filter_image",
+    "prompt_seed",
+    "read_cm_info",
+    "requests",
+    "scan_installed_loras",
+    "scan_installed_models",
+    "upscale_development_image",
+    "upscale_forge_image",
+    "validation_message",
+]
 
 
 # สร้างแอปจากค่ากำหนด เชื่อมบริการ และลงทะเบียนเส้นทางกับตัวจัดการข้อผิดพลาด
@@ -380,20 +258,34 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         "FORGE_EDIT_STEPS": int(os.getenv("FORGE_EDIT_STEPS", "20")),
         "FORGE_CONNECT_TIMEOUT": float(os.getenv("FORGE_CONNECT_TIMEOUT", "5")),
         "FORGE_READ_TIMEOUT": float(os.getenv("FORGE_READ_TIMEOUT", "300")),
+        "MODELS_DIR": os.getenv("MODELS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\StableDiffusion"),
+        "LORAS_DIR": os.getenv("LORAS_DIR", r"C:\.Work_MasTer\StabilityMatrix\Data\Models\Lora"),
+        "CLIP_SKIP": int(os.getenv("CLIP_SKIP", "2")),
+        "MAX_CONCURRENT_GENERATIONS": int(os.getenv("MAX_CONCURRENT_GENERATIONS", "1")),
+        "MAX_QUEUE_CAPACITY": int(os.getenv("MAX_QUEUE_CAPACITY", "20")),
+        "QUEUE_TIMEOUT_SECONDS": float(os.getenv("QUEUE_TIMEOUT_SECONDS", "180.0")),
     }
     if test_config:
         config.update(test_config)
 
-    # ตั้งรูปแบบบันทึกเพื่อใช้วิเคราะห์การทำงานของบริการ
+    # ตัวจัดการคิวและความพร้อมกันของ GPU ประจำแอป
+    queue_manager = GenerationQueueManager(
+        max_concurrency=1 if is_forge_provider(config) else int(config["MAX_CONCURRENT_GENERATIONS"]),
+        max_capacity=int(config["MAX_QUEUE_CAPACITY"]),
+        default_timeout=float(config["QUEUE_TIMEOUT_SECONDS"]),
+    )
 
+    # ตั้งรูปแบบบันทึกเพื่อใช้วิเคราะห์การทำงานของบริการ
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     app = FastAPI(
         title="LUMA AI Service",
         description="Private authenticated wrapper for WebUI Forge image generation and editing.",
         version="1.0.0",
     )
-    # เก็บค่ากำหนดไว้กับแอปเพื่อให้ endpoint ใช้ร่วมกัน
+    # เก็บค่ากำหนดและตัวจัดการคิวไว้กับแอปเพื่อให้ endpoint ใช้ร่วมกัน
     app.state.config = config
+    app.state.queue = queue_manager
+    app.state.queue_manager = queue_manager
 
     # แปลง ApiError เป็นคำตอบ JSON ตามรหัสที่บริการกำหนด
     @app.exception_handler(ApiError)
@@ -408,11 +300,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
     # แปลงข้อผิดพลาด HTTP ของเฟรมเวิร์กให้เป็นรูปแบบ JSON ของระบบ
     @app.exception_handler(StarletteHTTPException)
     async def http_error_handler(_request: Request, error: StarletteHTTPException):
-        if error.status_code == 404:
-            return error_response("not_found", "The requested endpoint does not exist.", 404)
-        return error_response("http_error", str(error.detail), error.status_code)
+        detail = error.detail if isinstance(error.detail, str) else "An unexpected error occurred."
+        return error_response("http_error", detail, error.status_code)
 
-    # ตรวจ Content-Length ก่อนประมวลผลคำขอ ส่วนไฟล์อัปโหลดมีการตรวจขนาดอีกครั้ง
+    # ตรวจขนาดข้อมูลคำขอไม่ให้เกินขีดจำกัดที่กำหนดไว้
     @app.middleware("http")
     async def limit_request_size(request: Request, call_next):
         content_length = request.headers.get("content-length")
@@ -432,7 +323,6 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             raise ApiError("unauthorized", "A valid service token is required.", 401)
 
     # ผูกการตรวจโทเคนกับ endpoint สร้างและแก้ไขภาพ
-
     private_api = Depends(authenticate_private_api)
 
     # ตรวจบริการที่พึ่งพาและส่งสถานะให้ผู้เรียกใช้ตรวจความพร้อม
@@ -448,62 +338,318 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                         "service": "luma-ai",
                         "provider": "webui-forge",
                         "error": str(exc),
+                        "queue": queue_manager.status(),
                     },
                     status_code=503,
                 )
-        return {"status": "ok", "service": "luma-ai", "provider": config["PROVIDER_NAME"]}
+        return {
+            "status": "ok",
+            "service": "luma-ai",
+            "provider": config["PROVIDER_NAME"],
+            "queue": queue_manager.status(),
+        }
+
+    # ดึงรายชื่อโมเดล Checkpoints ที่มีในเครื่อง
+    @app.get("/v1/models", tags=["models"], dependencies=[private_api])
+    def models():
+        items = scan_installed_models(config)
+        return {
+            "models": items,
+            "count": len(items),
+            "active_model": config.get("FORGE_CHECKPOINT") or (items[0]["name"] if items else None),
+            "source": "local_disk" if not is_forge_provider(config) else "forge_and_disk",
+        }
+
+    # ดึงรายชื่อ LoRA พร้อมแท็กสำหรับใช้ใน Prompt
+    @app.get("/v1/loras", tags=["loras"], dependencies=[private_api])
+    def loras():
+        items = scan_installed_loras(config)
+        return {
+            "loras": items,
+            "count": len(items),
+            "source": "local_disk" if not is_forge_provider(config) else "forge_and_disk",
+        }
+
+    # เสิร์ฟภาพพรีวิวตัวอย่างของโมเดล Checkpoint
+    @app.get("/v1/preview/model/{name}", tags=["models"])
+    def model_preview(name: str):
+        path = find_preview_file(name, config.get("MODELS_DIR", ""))
+        if not path or not path.exists():
+            return error_response("not_found", f"Preview image for model '{name}' not found.", 404)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+    # เสิร์ฟภาพพรีวิวตัวอย่างของ LoRA
+    @app.get("/v1/preview/lora/{name}", tags=["loras"])
+    def lora_preview(name: str):
+        path = find_preview_file(name, config.get("LORAS_DIR", ""))
+        if not path or not path.exists():
+            return error_response("not_found", f"Preview image for LoRA '{name}' not found.", 404)
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(str(path), media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+    # ดึงรายชื่อ Sampler ทั้งหมดที่รองรับ พร้อมหมวดหมู่และจำนวน steps แนะนำ
+    @app.get("/v1/samplers", tags=["settings"], dependencies=[private_api])
+    def samplers():
+        items = get_supported_samplers(config)
+        return {
+            "samplers": items,
+            "count": len(items),
+            "default": config.get("FORGE_SAMPLER") or "Euler",
+        }
+
+    # ดึงรายชื่อ Scheduler สำหรับควบคุม Noise Schedule
+    @app.get("/v1/schedulers", tags=["settings"], dependencies=[private_api])
+    def schedulers():
+        items = get_supported_schedulers(config)
+        return {
+            "schedulers": items,
+            "count": len(items),
+            "default": config.get("FORGE_SCHEDULER") or "Automatic",
+        }
+
+    # ดึงการตั้งค่าทั้งหมด: ค่ามาตรฐาน, ขอบเขตที่อนุญาต, อัตราส่วนภาพ และ Presets คุณภาพ
+    @app.get("/v1/settings", tags=["settings"], dependencies=[private_api])
+    def settings():
+        active_checkpoint = config.get("FORGE_CHECKPOINT") or ""
+        installed_models = scan_installed_models(config)
+        return {
+            "defaults": {
+                "sampler": config.get("FORGE_SAMPLER") or "Euler",
+                "scheduler": config.get("FORGE_SCHEDULER") or "Automatic",
+                "cfg_scale": float(config.get("FORGE_CFG_SCALE", 7.0)),
+                "steps": int(config.get("FORGE_EDIT_STEPS", 20)),
+                "clip_skip": int(config.get("CLIP_SKIP", 2)),
+                "width": 512,
+                "height": 512,
+                "active_model": active_checkpoint or (installed_models[0]["name"] if installed_models else None),
+            },
+            "ranges": {
+                "cfg_scale": {"min": 1.0, "max": 20.0, "step": 0.5, "default": float(config.get("FORGE_CFG_SCALE", 7.0))},
+                "steps": {"min": 1, "max": 50, "step": 1, "default": int(config.get("FORGE_EDIT_STEPS", 20))},
+                "clip_skip": {"min": 1, "max": 12, "step": 1, "default": int(config.get("CLIP_SKIP", 2))},
+                "dimensions": {"min": MIN_DIMENSION, "max": MAX_DIMENSION, "multiple_of": 64},
+            },
+            "aspect_ratios": ASPECT_RATIOS,
+            "presets": QUALITY_PRESETS,
+            "styles": STYLE_PRESETS,
+            "upscalers": get_supported_upscalers(config),
+            "default_upscaler": config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+",
+            "interrogators": [
+                {"id": "deepdanbooru", "name": "DeepDanbooru", "output_format": "tags"},
+                {"id": "clip", "name": "CLIP / BLIP", "output_format": "prose"},
+            ],
+            "total_models": len(installed_models),
+            "total_loras": len(scan_installed_loras(config)),
+        }
+
+    # ดึงรายชื่อ Style Presets ทั้งหมดที่รองรับ พร้อมคำอธิบายและตัวปรับแต่ง Prompt
+    @app.get("/v1/styles", tags=["styles"], dependencies=[private_api])
+    def styles():
+        categories = sorted(list({p["category"] for p in STYLE_PRESETS}))
+        return {
+            "styles": STYLE_PRESETS,
+            "count": len(STYLE_PRESETS),
+            "categories": categories,
+        }
+
+    # ดึงรายละเอียดเฉพาะของ Style Preset ตาม id
+    @app.get("/v1/styles/{style_id}", tags=["styles"], dependencies=[private_api])
+    def style_detail(style_id: str):
+        preset = get_style_preset_by_id(style_id)
+        if not preset:
+            return error_response("not_found", f"Style preset '{style_id}' not found.", 404)
+        return preset
+
+    # ดึงสถานะความคืบหน้าการสร้างภาพแบบเรียลไทม์ (Live Progress) พร้อมขั้นตอนและภาพพรีวิว
+    @app.get("/v1/progress", tags=["progress", "queue"], dependencies=[private_api])
+    def progress(include_preview: bool = False, job_id: str | None = None):
+        # ล็อกไม่ให้งานถัดไปเริ่มระหว่างตรวจเจ้าของและอ่านภาพพรีวิวจาก Forge
+        with queue_manager._lock:
+            if job_id is not None and job_id not in queue_manager._active_job_ids:
+                return {"job_id": job_id, "active": False, "progress": 0.0,
+                        "progress_percent": 0.0, "preview_image": None, "preview_available": False}
+            result = get_live_progress(config, queue_manager, include_preview=include_preview)
+            result["job_id"] = job_id
+            return result
+
+    # ดึงสถานะคิวและการใช้งาน GPU แบบเรียลไทม์
+    @app.get("/v1/queue/status", tags=["queue"], dependencies=[private_api])
+    def queue_status():
+        return queue_manager.status()
+
+    # ขอยกเลิกงานสร้างภาพที่กำลังประมวลผลอยู่บน WebUI Forge ทันที
+    @app.post("/v1/interrupt", tags=["queue"], dependencies=[private_api])
+    def interrupt(job_id: str):
+        with queue_manager._lock:
+            queue_manager._cancelled_job_ids[job_id] = time.monotonic()
+            if job_id not in queue_manager._active_job_ids:
+                return {"status": "cancelled", "job_id": job_id}
+            if is_forge_provider(config):
+                try:
+                    forge_request(config, "POST", "/sdapi/v1/interrupt", timeout=(2, 3))
+                except ProviderUnavailable as exc:
+                    raise ApiError("provider_unavailable", str(exc), 503) from exc
+                except ProviderError as exc:
+                    raise ApiError("provider_error", str(exc), 502) from exc
+            return {"status": "interrupted", "job_id": job_id}
+
+    # ขอข้ามขั้นตอนการสร้างภาพปัจจุบันบน WebUI Forge
+    @app.post("/v1/skip", tags=["queue"], dependencies=[private_api])
+    def skip(job_id: str):
+        with queue_manager._lock:
+            if job_id not in queue_manager._active_job_ids:
+                raise ApiError("job_not_active", "Only the active job can be skipped.", 409)
+            if is_forge_provider(config):
+                try:
+                    forge_request(config, "POST", "/sdapi/v1/skip", timeout=(2, 3))
+                except ProviderUnavailable as exc:
+                    raise ApiError("provider_unavailable", str(exc), 503) from exc
+                except ProviderError as exc:
+                    raise ApiError("provider_error", str(exc), 502) from exc
+            return {"status": "skipped", "job_id": job_id}
 
     # ตรวจข้อมูลสร้างภาพแล้วส่งต่อการประมวลผลตามหน้าที่ของบริการนี้
     @app.post("/v1/generate", tags=["images"], dependencies=[private_api])
-    def generate(payload: GenerateRequest):
-        seed = prompt_seed(payload.prompt, payload.seed)
-        try:
-            if is_forge_provider(config):
-                image, seed = generate_forge_image(
-                    config,
-                    payload.prompt,
-                    payload.negative_prompt,
-                    payload.width,
-                    payload.height,
-                    seed,
-                    payload.steps,
-                )
-            else:
-                image = generate_development_image(payload.prompt, payload.width, payload.height, seed)
-        except ProviderUnavailable as exc:
-            raise ApiError("provider_unavailable", str(exc), 503) from exc
-        except ProviderError as exc:
-            raise ApiError("provider_error", str(exc), 502) from exc
-        # ใช้บัฟเฟอร์ในหน่วยความจำแทนไฟล์ชั่วคราวสำหรับข้อมูลภาพ
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
-        # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
-        return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
-            headers={
+    def generate(payload: GenerateRequest, request: Request):
+        effective_prompt, effective_neg, effective_sampler, effective_sched, effective_cfg, effective_clip, effective_steps, matched_style = apply_style_preset(
+            payload.style_preset,
+            payload.prompt,
+            negative_prompt=payload.negative_prompt,
+            sampler=payload.sampler,
+            scheduler=payload.scheduler,
+            cfg_scale=payload.cfg_scale,
+            clip_skip=payload.clip_skip,
+            steps=payload.steps,
+        )
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"]), job_id=request.headers.get("X-LUMA-Job-ID")) as job_stats:
+            seed = prompt_seed(effective_prompt, payload.seed)
+            try:
+                if is_forge_provider(config):
+                    image, seed = generate_forge_image(
+                        config,
+                        effective_prompt,
+                        effective_neg,
+                        payload.width,
+                        payload.height,
+                        seed,
+                        effective_steps or payload.steps,
+                        model=payload.model,
+                        loras=payload.loras,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                    )
+                else:
+                    image = generate_development_image(
+                        effective_prompt,
+                        payload.width,
+                        payload.height,
+                        seed,
+                        model=payload.model,
+                        loras=payload.loras,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                        style_preset=matched_style["id"] if matched_style else None,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            # ใช้บัฟเฟอร์ในหน่วยความจำและฝัง Generation Metadata (PNG Info) ลงในไฟล์ภาพ
+            buffer = io.BytesIO()
+            active_sampler = effective_sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = effective_cfg if effective_cfg is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            active_model = payload.model or config.get("FORGE_CHECKPOINT") or "SDXL"
+
+            pnginfo = PngInfo()
+            param_parts = [effective_prompt]
+            if payload.negative_prompt:
+                param_parts.append(f"Negative prompt: {payload.negative_prompt}")
+            setting_parts = [
+                f"Steps: {effective_steps or payload.steps}",
+                f"Sampler: {active_sampler}",
+            ]
+            if effective_sched:
+                setting_parts.append(f"Schedule type: {effective_sched}")
+            setting_parts.extend([
+                f"CFG scale: {active_cfg}",
+                f"Seed: {seed}",
+                f"Size: {payload.width}x{payload.height}",
+                f"Model: {active_model}",
+            ])
+            param_parts.append(", ".join(setting_parts))
+            pnginfo.add_text("parameters", "\n".join(param_parts))
+
+            image.save(buffer, format="PNG", pnginfo=pnginfo, optimize=True)
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            response_headers = {
                 "Content-Disposition": f'attachment; filename="luma-{seed}.png"',
                 "X-LUMA-Seed": str(seed),
                 "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
-            },
-        )
+                "X-LUMA-Sampler": str(active_sampler),
+                "X-LUMA-CFG-Scale": str(active_cfg),
+                "X-LUMA-Steps": str(effective_steps or payload.steps),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            if payload.model:
+                response_headers["X-LUMA-Model"] = str(payload.model)
+            if payload.loras:
+                response_headers["X-LUMA-LoRAs"] = json.dumps(payload.loras)
+            if effective_sched:
+                response_headers["X-LUMA-Scheduler"] = str(effective_sched)
+            if effective_clip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(effective_clip)
+            if matched_style:
+                response_headers["X-LUMA-Style-Preset"] = str(matched_style["id"])
 
-    # ตรวจภาพที่อัปโหลดและพารามิเตอร์แก้ไขก่อนส่งต่อการประมวลผล
-    @app.post("/v1/edit", tags=["images"], dependencies=[private_api])
-    def edit(
-        image: Annotated[UploadFile, File(description="Source image to edit")],
-        prompt: Annotated[str, Form()],
-        strength_value: Annotated[str, Form(alias="strength")] = "0.65",
-        seed_value: Annotated[str | None, Form(alias="seed")] = None,
+            # ส่งข้อมูลภาพ PNG พร้อม seed และชื่อ provider ในส่วนหัว
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
+                headers=response_headers,
+            )
+
+    # ดึงรายชื่อโมเดล Interrogator ที่รองรับ
+    @app.get("/v1/interrogate/models", tags=["images", "interrogate"], dependencies=[private_api])
+    def interrogate_models():
+        return {
+            "models": [
+                {
+                    "id": "deepdanbooru",
+                    "name": "DeepDanbooru",
+                    "description": "Booru anime tags format (e.g. 1girl, solo, blue eyes). Best for anime/manga models.",
+                    "output_format": "tags",
+                },
+                {
+                    "id": "clip",
+                    "name": "CLIP / BLIP",
+                    "description": "Natural language descriptive sentence. Best for photorealistic and general concepts.",
+                    "output_format": "prose",
+                },
+            ],
+            "default": "deepdanbooru",
+        }
+
+    # ถอดคำบรรยายหรือแท็ก Danbooru จากภาพอ้างอิงด้วย DeepDanbooru หรือ CLIP
+    @app.post("/v1/interrogate", tags=["images", "interrogate"], dependencies=[private_api])
+    def interrogate(
+        image: Annotated[UploadFile, File(description="Source image to interrogate")],
+        model: Annotated[str, Form(description="Interrogator model: deepdanbooru or clip")] = "deepdanbooru",
     ):
         if not image.filename:
             raise ApiError("validation_error", "An image file is required.", 400)
         try:
-            parsed_prompt = parse_prompt(prompt)
-            strength = float(strength_value)
-            if not 0 <= strength <= 1:
-                raise ValueError("Strength must be between 0 and 1.")
-            seed = prompt_seed(parsed_prompt, seed_value)
+            interrogate_model = str(model or "deepdanbooru").strip().lower()
+            if interrogate_model not in {"deepdanbooru", "clip"}:
+                raise ValueError("Model must be 'deepdanbooru' or 'clip'.")
+
             image.file.seek(0, io.SEEK_END)
             if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
                 raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
@@ -519,43 +665,409 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
         except (ValueError, UnidentifiedImageError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    caption = interrogate_forge_image(config, source, model=interrogate_model)
+                else:
+                    caption = interrogate_development_image(source, model=interrogate_model)
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            tags = [t.strip() for t in caption.split(",") if t.strip()]
+
+            response_headers = {
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Model": interrogate_model,
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+            }
+            return JSONResponse(
+                content={
+                    "status": "ok",
+                    "model": interrogate_model,
+                    "caption": caption,
+                    "tags": tags,
+                    "provider": config["PROVIDER_NAME"],
+                    "execution_ms": current_exec_ms,
+                },
+                headers=response_headers,
+            )
+
+    # ดึงรายชื่อ AI Upscalers ที่ระบบรองรับ
+    @app.get("/v1/upscalers", tags=["images", "upscale"], dependencies=[private_api])
+    def upscalers():
+        items = get_supported_upscalers(config)
+        default_upscaler = config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+"
+        return {
+            "upscalers": items,
+            "count": len(items),
+            "default": default_upscaler,
+            "supported_scales": [1.5, 2.0, 3.0, 4.0],
+        }
+
+    # ขยายความละเอียดและเพิ่มรายละเอียดภาพด้วย AI Upscaler (High-Res Fix / Super Resolution)
+    @app.post("/v1/upscale", tags=["images", "upscale"], dependencies=[private_api])
+    def upscale(
+        image: Annotated[UploadFile, File(description="Source image to upscale")],
+        scale_factor: Annotated[str, Form(alias="scale_factor")] = "2.0",
+        upscaler: Annotated[str | None, Form()] = None,
+    ):
+        if not image.filename:
+            raise ApiError("validation_error", "An image file is required.", 400)
         try:
-            if is_forge_provider(config):
-                result, seed = edit_forge_image(config, source, parsed_prompt, strength, seed)
-            else:
-                result = edit_development_image(source, parsed_prompt, strength, seed)
-        except ProviderUnavailable as exc:
-            raise ApiError("provider_unavailable", str(exc), 503) from exc
-        except ProviderError as exc:
-            raise ApiError("provider_error", str(exc), 502) from exc
-        buffer = io.BytesIO()
-        result.save(buffer, format="PNG", optimize=True)
-        return Response(
-            content=buffer.getvalue(),
-            media_type="image/png",
-            headers={
+            scale = float(scale_factor)
+            if not 1.0 <= scale <= 4.0:
+                raise ValueError("Scale factor must be between 1.0 and 4.0.")
+            image.file.seek(0, io.SEEK_END)
+            if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
+                raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
+            image.file.seek(0)
+            source = Image.open(image.file)
+            source.verify()
+            image.file.seek(0)
+            source = Image.open(image.file)
+            if source.width * source.height > MAX_DIMENSION * MAX_DIMENSION * 4:
+                raise ValueError("The input image has too many pixels.")
+            if source.width * scale > 4096 or source.height * scale > 4096:
+                raise ValueError(f"Upscaling by {scale}x would exceed maximum allowable dimensions (4096px).")
+        except ApiError:
+            raise
+        except (ValueError, UnidentifiedImageError) as exc:
+            raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
+
+        effective_upscaler = (upscaler or config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+").strip()
+
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    result = upscale_forge_image(
+                        config,
+                        source,
+                        scale_factor=scale,
+                        upscaler=effective_upscaler,
+                    )
+                else:
+                    result = upscale_development_image(
+                        source,
+                        scale_factor=scale,
+                        upscaler=effective_upscaler,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG", optimize=True)
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+
+            response_headers = {
+                "Content-Disposition": f'attachment; filename="luma-upscale-{result.width}x{result.height}.png"',
+                "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Upscaler": effective_upscaler,
+                "X-LUMA-Scale": str(scale),
+                "X-LUMA-Width": str(result.width),
+                "X-LUMA-Height": str(result.height),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
+                headers=response_headers,
+            )
+
+    # ตรวจภาพที่อัปโหลดและพารามิเตอร์แก้ไขก่อนส่งต่อการประมวลผล
+    @app.post("/v1/edit", tags=["images"], dependencies=[private_api])
+    def edit(
+        request: Request,
+        image: Annotated[UploadFile, File(description="Source image to edit")],
+        prompt: Annotated[str, Form()],
+        strength_value: Annotated[str, Form(alias="strength")] = "0.65",
+        seed_value: Annotated[str | None, Form(alias="seed")] = None,
+        model: Annotated[str | None, Form()] = None,
+        loras: Annotated[str | None, Form()] = None,
+        sampler: Annotated[str | None, Form()] = None,
+        scheduler: Annotated[str | None, Form()] = None,
+        cfg_scale_value: Annotated[str | None, Form(alias="cfg_scale")] = None,
+        clip_skip_value: Annotated[str | None, Form(alias="clip_skip")] = None,
+        style_preset: Annotated[str | None, Form(alias="style_preset")] = None,
+    ):
+        if not image.filename:
+            raise ApiError("validation_error", "An image file is required.", 400)
+        try:
+            parsed_prompt = parse_prompt(prompt)
+            strength = float(strength_value)
+            if not 0 <= strength <= 1:
+                raise ValueError("Strength must be between 0 and 1.")
+            seed = prompt_seed(parsed_prompt, seed_value)
+            cfg_scale = float(cfg_scale_value) if cfg_scale_value not in (None, "") else None
+            clip_skip = int(clip_skip_value) if clip_skip_value not in (None, "") else None
+            parsed_loras = None
+            if loras:
+                try:
+                    parsed_loras = json.loads(loras)
+                except Exception:
+                    parsed_loras = [name.strip() for name in loras.split(",") if name.strip()]
+            image.file.seek(0, io.SEEK_END)
+            if image.file.tell() > int(config["MAX_CONTENT_LENGTH"]):
+                raise ApiError("request_too_large", "The request exceeds the configured size limit.", 413)
+            image.file.seek(0)
+            source = Image.open(image.file)
+            source.verify()
+            image.file.seek(0)
+            source = Image.open(image.file)
+            if source.width * source.height > MAX_DIMENSION * MAX_DIMENSION * 4:
+                raise ValueError("The input image has too many pixels.")
+        except ApiError:
+            raise
+        except (ValueError, UnidentifiedImageError) as exc:
+            raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
+
+        effective_prompt, _, effective_sampler, effective_sched, effective_cfg, effective_clip, _, matched_style = apply_style_preset(
+            style_preset,
+            parsed_prompt,
+            sampler=sampler,
+            scheduler=scheduler,
+            cfg_scale=cfg_scale,
+            clip_skip=clip_skip,
+        )
+
+        with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"]), job_id=request.headers.get("X-LUMA-Job-ID")) as job_stats:
+            try:
+                if is_forge_provider(config):
+                    result, seed = edit_forge_image(
+                        config,
+                        source,
+                        effective_prompt,
+                        strength,
+                        seed,
+                        model=model,
+                        loras=parsed_loras,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                    )
+                else:
+                    result = edit_development_image(
+                        source,
+                        effective_prompt,
+                        strength,
+                        seed,
+                        model=model,
+                        loras=parsed_loras,
+                        sampler=effective_sampler,
+                        scheduler=effective_sched,
+                        cfg_scale=effective_cfg,
+                        clip_skip=effective_clip,
+                        style_preset=matched_style["id"] if matched_style else None,
+                    )
+            except ProviderUnavailable as exc:
+                raise ApiError("provider_unavailable", str(exc), 503) from exc
+            except ProviderError as exc:
+                raise ApiError("provider_error", str(exc), 502) from exc
+
+            buffer = io.BytesIO()
+            result.save(buffer, format="PNG", optimize=True)
+            active_sampler = effective_sampler or config.get("FORGE_SAMPLER") or "Euler"
+            active_cfg = effective_cfg if effective_cfg is not None else float(config.get("FORGE_CFG_SCALE", 7.0))
+            current_exec_ms = round((time.perf_counter() - job_stats["exec_start"]) * 1000.0, 1)
+            response_headers = {
                 "Content-Disposition": f'attachment; filename="luma-edit-{seed}.png"',
                 "X-LUMA-Seed": str(seed),
                 "X-LUMA-Provider": str(config["PROVIDER_NAME"]),
+                "X-LUMA-Sampler": str(active_sampler),
+                "X-LUMA-CFG-Scale": str(active_cfg),
+                "X-LUMA-Queue-Wait-Ms": str(job_stats["wait_ms"]),
+                "X-LUMA-Execution-Ms": str(current_exec_ms),
+                "X-LUMA-Queue-Remaining": str(job_stats["remaining_queued"]),
+            }
+            if model:
+                response_headers["X-LUMA-Model"] = str(model)
+            if parsed_loras:
+                response_headers["X-LUMA-LoRAs"] = json.dumps(parsed_loras)
+            if effective_sched:
+                response_headers["X-LUMA-Scheduler"] = str(effective_sched)
+            if effective_clip is not None:
+                response_headers["X-LUMA-Clip-Skip"] = str(effective_clip)
+            if matched_style:
+                response_headers["X-LUMA-Style-Preset"] = str(matched_style["id"])
+            return Response(
+                content=buffer.getvalue(),
+                media_type="image/png",
+                headers=response_headers,
+            )
+
+    # ดึงรายชื่อ Filter และ Image Processing Operations ที่ระบบรองรับ (API_Workshop compatible)
+    @app.get("/v1/filters", tags=["images", "filters"])
+    @app.get("/filters", tags=["images", "filters"])
+    def get_supported_filters():
+        return {
+            "operations": [
+                {
+                    "id": "grayscale",
+                    "name": "Grayscale",
+                    "algorithm": "Luminance Weighted Sum (ITU-R BT.601: 0.299R + 0.587G + 0.114B)",
+                    "description": "Convert RGB to monochrome luminance channel.",
+                },
+                {
+                    "id": "edge",
+                    "name": "Edge Detection",
+                    "algorithm": "Spatial 2D Convolution Kernel Filter (Laplacian / FIND_EDGES)",
+                    "description": "Detect high-gradient boundaries and contours for ControlNet lineart.",
+                },
+                {
+                    "id": "blur",
+                    "name": "Gaussian Blur",
+                    "algorithm": "2D Gaussian Kernel Smoothing (radius=4)",
+                    "description": "Low-pass spatial filter for noise reduction and smoothing.",
+                },
+                {
+                    "id": "invert",
+                    "name": "Color Inversion",
+                    "algorithm": "Arithmetic Channel Inversion (255 - X)",
+                    "description": "Negative color transformation.",
+                },
+            ],
+            "default": "grayscale",
+        }
+
+    # ประมวลผลภาพ (Grayscale, Edge Detection, Blur, Invert) ตามมาตรฐาน API_Workshop
+    @app.post(
+        "/process",
+        tags=["images", "filters"],
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    @app.post(
+        "/v1/process",
+        tags=["images", "filters"],
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    @app.post(
+        "/v1/filters/process",
+        tags=["images", "filters"],
+        response_class=Response,
+        responses={200: {"content": {"image/png": {}}}},
+    )
+    async def process_image_endpoint(
+        file: UploadFile = File(description="Source image file (JPEG, PNG, WebP)"),
+        operation: Annotated[str, Form(description="Operation: grayscale, edge, blur, invert")] = "grayscale",
+    ) -> Response:
+        """ตรวจสอบไฟล์ ใช้ operation ที่ร้องขอ และตอบกลับเป็นภาพ PNG (API_Workshop compatible)."""
+        # ตรวจ MIME type เบื้องต้น
+        if file.content_type and file.content_type not in ALLOWED_FILTER_CONTENT_TYPES:
+            raise ApiError("unsupported_media_type", "รองรับเฉพาะไฟล์ JPEG, PNG และ WebP", 415)
+
+        op = str(operation or "grayscale").strip().lower()
+        if op not in FILTER_OPERATIONS:
+            raise ApiError(
+                "validation_error",
+                f"ไม่รู้จักรูปแบบการประมวลผล '{op}'. รองรับเฉพาะ: {', '.join(sorted(FILTER_OPERATIONS))}",
+                400,
+            )
+
+        max_size = int(config.get("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))
+        file_bytes = await file.read(max_size + 1)
+        await file.close()
+
+        if not file_bytes:
+            raise ApiError("validation_error", "ไฟล์ภาพว่างเปล่า", 400)
+        if len(file_bytes) > max_size:
+            raise ApiError("request_too_large", "ไฟล์ภาพต้องมีขนาดไม่เกิน 10 MB", 413)
+
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as source_image:
+                source_image.load()
+                result_image = process_filter_image(source_image, op)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ApiError("validation_error", f"ไม่สามารถอ่านหรือประมวลผลภาพนี้ได้: {exc}", 400) from exc
+
+        output = io.BytesIO()
+        result_image.save(output, format="PNG")
+        output_bytes = output.getvalue()
+
+        return Response(
+            content=output_bytes,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'inline; filename="processed-{op}.png"',
+                "X-Image-Operation": op,
+                "X-LUMA-Operation": op,
+                "X-LUMA-Width": str(result_image.width),
+                "X-LUMA-Height": str(result_image.height),
             },
         )
+
+    # ดึงข้อมูล Generation Metadata จากภาพ (Prompt, Negative Prompt, Settings)
+    @app.post(
+        "/v1/png-info",
+        tags=["images", "metadata"],
+    )
+    async def get_png_info_endpoint(
+        file: UploadFile = File(description="Source image file to extract generation metadata from"),
+    ) -> dict[str, Any]:
+        """Extract generation parameters (Prompt, Negative prompt, Steps, Sampler, Seed, etc.) from an image."""
+        max_size = 20 * 1024 * 1024
+        file_bytes = await file.read(max_size + 1)
+        await file.close()
+
+        if not file_bytes:
+            raise ApiError("validation_error", "File is empty", 400)
+
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as img:
+                info_dict = getattr(img, "info", {}) or {}
+                text_dict = getattr(img, "text", {}) or {}
+                raw_params = info_dict.get("parameters") or text_dict.get("parameters") or ""
+                if not raw_params:
+                    for k, v in info_dict.items():
+                        if isinstance(v, str) and ("Steps:" in v or "Negative prompt:" in v):
+                            raw_params = v
+                            break
+
+                parsed = parse_png_parameters(raw_params) if raw_params else {}
+                return {
+                    "has_metadata": bool(raw_params),
+                    "raw_parameters": raw_params,
+                    "parsed": parsed,
+                    "format": img.format,
+                    "width": img.width,
+                    "height": img.height,
+                }
+        except (UnidentifiedImageError, OSError, ValueError, AttributeError) as exc:
+            raise ApiError("validation_error", f"Could not read image metadata: {exc}", 400) from exc
+
+    # ค้นหาแท็ก Danbooru สำหรับระบบ Tag Auto-Complete
+    @app.get("/v1/tags", tags=["tags"])
+    def get_tags_endpoint(q: str = "", limit: int = 20) -> dict[str, Any]:
+        """Search Danbooru tag suggestions for prompt autocomplete."""
+        query = str(q or "").strip().lower()
+        safe_limit = max(1, min(int(limit), 50))
+        results = search_tags(query, limit=safe_limit)
+        return {"tags": results, "count": len(results), "query": query}
 
     return app
 
 
+# อินสแตนซ์หลักระดับโมดูลสำหรับเรียกใช้งานผ่าน ASGI server (e.g., uvicorn app:app)
 app = create_app()
 
 # เริ่มบริการหรือคำสั่งเฉพาะเมื่อรันไฟล์นี้โดยตรง
-
 if __name__ == "__main__":
     import uvicorn
 
     # ให้ Uvicorn เปิด FastAPI บน host และพอร์ตที่กำหนด
-
     uvicorn.run(
         "app:app",
         host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", "8000")),
         reload=os.getenv("FASTAPI_DEBUG", "0") == "1",
     )
-
