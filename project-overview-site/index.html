@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project LUMA — คู่มือสถาปัตยกรรมการทำงานและโครงสร้างโค้ดอย่างละเอียด (ภาษาไทย)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- แสง Ambient Glow พื้นหลัง -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="cyber-grid"></div>
+
+  <!-- แถบนำทางด้านบน (Header) -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-badge">คู่มือระบบฉบับสมบูรณ์</span>
+        <h1 class="brand-title">PROJECT <span>LUMA</span></h1>
+      </div>
+      <div class="header-search">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="quickSearch" placeholder="พิมพ์ค้นหา ฟังก์ชัน, โค้ด, หรือขั้นตอนการทำงาน..." autocomplete="off">
+        <span class="search-shortcut">Ctrl+K</span>
+      </div>
+      <div class="header-tags">
+        <a href="code-deep-dive.html" class="tag tag-purple" style="text-decoration: none; font-weight: 700; cursor: pointer; border: 1px solid rgba(168, 85, 247, 0.6); background: rgba(168, 85, 247, 0.25);">🔬 หน้าเจาะลึกโค้ดทุกไฟล์ ➔</a>
+        <span class="tag tag-blue">3-PC Distributed</span>
+        <span class="tag tag-emerald">FastAPI + Flask + Nginx</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="doc-layout">
+    <!-- เมนูแถบข้าง (Sidebar) -->
+    <aside class="doc-sidebar">
+      <nav class="nav-tree">
+        <div class="nav-group">
+          <span class="nav-group-title">การเลือกหน้าเอกสาร</span>
+          <a href="index.html" class="nav-link active"><span class="dot"></span>1. สถาปัตยกรรม & Flowchart</a>
+          <a href="code-deep-dive.html" class="nav-link" style="color: #a78bfa; font-weight: 600;"><span class="dot" style="background:#a78bfa;"></span>2. เจาะลึกโค้ดทุกไฟล์ ➔</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">ภาพรวมระบบ</span>
+          <a href="#analogy" class="nav-link"><span class="dot"></span>เปรียบเทียบให้เห็นภาพ (เข้าใจง่าย)</a>
+          <a href="#topology" class="nav-link"><span class="dot"></span>โครงสร้าง 3 เครื่อง (Hamachi)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">4 เสาหลักของโปรแกรม</span>
+          <a href="#pillar-frontend" class="nav-link"><span class="dot"></span>1. Frontend (หน้าร้าน / UI)</a>
+          <a href="#pillar-nginx" class="nav-link"><span class="dot"></span>2. Nginx (รปภ. คัดแยกงาน)</a>
+          <a href="#pillar-backend" class="nav-link"><span class="dot"></span>3. Backend (ผู้จัดการ / แคชเชียร์)</a>
+          <a href="#pillar-aiengine" class="nav-link"><span class="dot"></span>4. AiEngine (หัวหน้าเชฟ & เตา GPU)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">ผังการทำงาน (Flowcharts)</span>
+          <a href="#flowchart-main" class="nav-link"><span class="dot"></span>ผังการเจนภาพ 12 ขั้นตอน</a>
+          <a href="#flowchart-main" class="nav-link"><span class="dot"></span>ผังแสดงแถบหลอดโหลด & Preview</a>
+          <a href="#troubleshooting-recap" class="nav-link"><span class="dot"></span>ผังปุ่มหยุดฉุกเฉิน (Cancel)</a>
+          <a href="#code-bridge-5" class="nav-link"><span class="dot"></span>ผังดาวน์โหลดภาพ Blob ทะลุกฎ</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">เจาะลึกโค้ดทีละบรรทัด</span>
+          <a href="#code-bridge-1" class="nav-link"><span class="dot"></span>ขั้น 1: Frontend ส่งไป Backend</a>
+          <a href="#code-bridge-2" class="nav-link"><span class="dot"></span>ขั้น 2: Backend ส่งข้ามไป AiEngine</a>
+          <a href="#code-bridge-3" class="nav-link"><span class="dot"></span>ขั้น 3: AiEngine สั่งเตาอบ Forge GPU</a>
+          <a href="#flowchart-main" class="nav-link"><span class="dot"></span>ขั้น 4: ฝังพารามิเตอร์ลับ & เซฟไฟล์</a>
+          <a href="#code-bridge-5" class="nav-link"><span class="dot"></span>ขั้น 5: ส่งภาพกลับมาแสดง & โหลดลงคอม</a>
+          <a href="#code-bridge-filters" class="nav-link"><span class="dot"></span>ขั้น 6: การพิสูจน์ฟิลเตอร์ภาพทั้ง 4</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">แกลเลอรีภาพตัวอย่างจริง</span>
+          <a href="#gallery-preview" class="nav-link"><span class="dot"></span>ภาพหน้าจอตัวอย่างระบบจริง</a>
+          <a href="#troubleshooting-recap" class="nav-link"><span class="dot"></span>สรุปบั๊กและการแก้ปัญหาในอดีต</a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- เนื้อหาหลัก (Content) -->
+    <main class="doc-content">
+
+      <!-- หมวดที่ 1: เปรียบเทียบให้เห็นภาพ -->
+      <section id="analogy" class="doc-section">
+        <div class="section-badge">บทที่ 1 — ปูพื้นฐานสำหรับคนไม่มีความรู้โค้ด</div>
+        <h2>Project LUMA คืออะไร? (เปรียบเทียบเป็น "ภัตตาคาร AI ไฮเทค")</h2>
+        <p class="lead-text">
+          ถ้าคุณไม่เคยเขียนโปรแกรมมาก่อน ไม่รู้ว่า Backend คืออะไร หรือ Nginx มีไว้ทำไม ให้ลองจินตนาการว่า <strong>Project LUMA คือ "ร้านอาหารญี่ปุ่นโอมากาเสะสุดหรู"</strong> ที่แบ่งแผนกการทำงานออกเป็น 4 ส่วนอย่างชัดเจน เพื่อให้ลูกค้านั่งกินได้อย่างสบายใจโดยที่ห้องครัวไม่ระเบิด:
+        </p>
+
+        <div class="analogy-grid">
+          <!-- การ์ด 1: Frontend -->
+          <div class="analogy-card" id="pillar-frontend">
+            <div class="analogy-icon">📱</div>
+            <div class="analogy-header">
+              <span class="analogy-role">ส่วนที่ 1: Frontend</span>
+              <h3>หน้าร้าน และ เล่มเมนูอาหาร</h3>
+            </div>
+            <p>
+              คือหน้าจอสวย ๆ ที่ผู้ใช้มองเห็นบน Google Chrome เหมือนลูกค้าเดินเข้ามานั่งที่โต๊ะ มีช่องให้เขียนสั่งอาหาร (Prompt), มีเมนูคอยแนะนำชื่อเมนูยอดฮิต (Danbooru Tag แนะนำคำ), มีแถบหลอดโหลดบอกว่าอาหารทำถึงไหนแล้ว และมีปุ่มให้กดรับภาพอาหารกลับบ้าน (Download)
+            </p>
+            <div class="analogy-file">ไฟล์หลัก: <code>frontend/index.html</code>, <code>frontend/assets/app.js</code></div>
+          </div>
+
+          <!-- การ์ด 2: Nginx -->
+          <div class="analogy-card" id="pillar-nginx">
+            <div class="analogy-icon">🚪</div>
+            <div class="analogy-header">
+              <span class="analogy-role">ส่วนที่ 2: Nginx</span>
+              <h3>รปภ. และ พนักงานต้อนรับหน้าประตู</h3>
+            </div>
+            <p>
+              ยืนอยู่หน้าประตูร้าน คอยดูว่าคนที่เดินเข้ามาต้องการอะไร? ถ้าลูกค้าแค่อยากดูเล่มเมนู ก็แจกไฟล์หน้าเว็บให้ไปดู แต่ถ้าลูกค้าจะสั่งอาหาร (คำขอ <code>/api/</code>) รปภ. จะพาเดินไปส่งให้ผู้จัดการร้าน หรือถ้าอาหารทำเสร็จแล้ว (คำขอ <code>/media/</code>) รปภ. ก็จะวิ่งไปเบิกรูปอาหารมาส่งให้ถึงมือ
+            </p>
+            <div class="analogy-file">ไฟล์หลัก: <code>nginx/nginx.conf</code>, <code>nginx/luma.conf</code></div>
+          </div>
+
+          <!-- การ์ด 3: Backend -->
+          <div class="analogy-card" id="pillar-backend">
+            <div class="analogy-icon">📋</div>
+            <div class="analogy-header">
+              <span class="analogy-role">ส่วนที่ 3: Backend</span>
+              <h3>ผู้จัดการร้าน และ แคชเชียร์จดบัญชี</h3>
+            </div>
+            <p>
+              คอยตรวจสอบบัตรสมาชิก (ล็อกอินด้วยรหัสผ่านและ JWT Token), เช็กว่าใบสั่งอาหารเขียนถูกต้องไหม, จดเลขออเดอร์ลงสมุดบัญชีร้าน (SQLite Database) ว่านี่คืองานหมายเลขอะไร แล้วจ้างเด็กส่งสาร (Worker Thread) วิ่งถือใบสั่งงานข้ามสายแลนไปส่งให้ห้องครัวใหญ่
+            </p>
+            <div class="analogy-file">ไฟล์หลัก: <code>backend/luma_backend/jobs.py</code>, <code>worker.py</code></div>
+          </div>
+
+          <!-- การ์ด 4: AiEngine -->
+          <div class="analogy-card" id="pillar-aiengine">
+            <div class="analogy-icon">👨‍🍳</div>
+            <div class="analogy-header">
+              <span class="analogy-role">ส่วนที่ 4: AiEngine & Forge</span>
+              <h3>หัวหน้าเชฟ และ เตาอบการ์ดจอ GPU</h3>
+            </div>
+            <p>
+              อยู่ในห้องครัวใหญ่ (เครื่องที่มีการ์ดจอแรง ๆ) หัวหน้าเชฟจะคอยคุมคิว (Queue Lock) ไม่ให้คนแย่งกันใช้เตาอบจนไฟดับ แล้วส่งคำสั่งเข้าเตาอบการ์ดจอ (WebUI Forge / SDXL) ให้สุ่มเม็ดทรายสัญญาณรบกวน 28 รอบจนกลายเป็นภาพวาดอนิเมะ พอภาพออกมา เชฟจะเขียนสูตรลับลงบนกล่อง (PNG Info) แล้วส่งภาพกลับไปให้ผู้จัดการ
+            </p>
+            <div class="analogy-file">ไฟล์หลัก: <code>ai-engine/app.py</code>, <code>forge_client.py</code></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- หมวดที่ 2: ผังเครือข่าย 3 เครื่อง -->
+      <section id="topology" class="doc-section">
+        <div class="section-badge">บทที่ 2 — ผังการเชื่อมต่อจริงในระบบ</div>
+        <h2>โครงสร้างการเชื่อมต่อ 3 เครื่องผ่านวง Hamachi (3-PC Setup)</h2>
+        <p>
+          ในการใช้งานจริง โปรแกรมนี้ไม่ได้รันรวมกันในคอมเครื่องเดียว แต่ถูกแยกกระจายออกไป 3 เครื่อง โดยคุยกันผ่านสายแลนเสมือน (LogMeIn Hamachi) เพื่อแบ่งเบาภาระของแต่ละเครื่อง:
+        </p>
+
+        <!-- แผนภาพเครือข่ายจำลอง -->
+        <div class="network-diagram-box">
+          <div class="net-node net-pc1">
+            <div class="net-tag">เครื่องที่ 1 (เครื่องคุณ / AI PC)</div>
+            <h4>🖥️ PC 1: AiEngine & Forge</h4>
+            <div class="net-ip">Hamachi IP: <code>25.23.21.202</code></div>
+            <div class="net-detail">
+              <div><strong>Port 8000:</strong> FastAPI LUMA Wrapper</div>
+              <div><strong>Port 7860:</strong> Stability Matrix / WebUI Forge</div>
+            </div>
+            <p class="net-duty">หน้าที่: มีการ์ดจอ NVIDIA RTX ประมวลผลโมเดล SDXL และคุมคิวเจนภาพ</p>
+          </div>
+
+          <div class="net-arrow-col">
+            <div class="net-arrow-line">
+              <span class="net-arrow-text">ส่งค่างาน ➔</span>
+              <span class="net-arrow-sub">POST /v1/generate</span>
+              <span class="net-arrow-text">⬅️ ส่งไฟล์ภาพ PNG คืน</span>
+            </div>
+          </div>
+
+          <div class="net-node net-pc3">
+            <div class="net-tag">เครื่องที่ 3 (เพื่อนคนที่ 2 / Database PC)</div>
+            <h4>🗄️ PC 3: Backend & Database</h4>
+            <div class="net-ip">Local LAN IP: <code>172.20.56.162</code></div>
+            <div class="net-detail">
+              <div><strong>Port 5000:</strong> Flask REST API (Waitress)</div>
+              <div><strong>ที่เก็บไฟล์:</strong> SQLite (<code>luma.db</code>) + โฟลเดอร์รูปภาพ</div>
+            </div>
+            <p class="net-duty">หน้าที่: เก็บข้อมูลผู้ใช้ คุมคิวงาน สร้างลิงก์ความปลอดภัย HMAC และเซฟภาพลงฮาร์ดดิสก์</p>
+          </div>
+
+          <div class="net-arrow-col">
+            <div class="net-arrow-line">
+              <span class="net-arrow-text">Proxy ไปหา ➔</span>
+              <span class="net-arrow-sub">Reverse Proxy /api/ & /media/</span>
+              <span class="net-arrow-text">⬅️ ส่งข้อมูลผลลัพธ์คืน</span>
+            </div>
+          </div>
+
+          <div class="net-node net-pc2">
+            <div class="net-tag">เครื่องที่ 2 (เพื่อนคนที่ 1 / Web Host)</div>
+            <h4>🌐 PC 2: Frontend & Nginx</h4>
+            <div class="net-ip">Hamachi IP: <code>25.10.76.51</code></div>
+            <div class="net-detail">
+              <div><strong>Port 8080:</strong> Nginx Web Server</div>
+              <div><strong>หน้าเว็บ:</strong> HTML / CSS / JS Single Page App</div>
+            </div>
+            <p class="net-duty">หน้าที่: เปิดให้ทุกคนเข้าเว็บผ่าน <code>http://25.10.76.51:8080/</code> และส่งข้อมูลต่อไปยัง Backend</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- หมวดที่ 3: ผังการทำงาน 12 ขั้นตอน (Flowchart) -->
+      <section id="flowchart-main" class="doc-section">
+        <div class="section-badge">บทที่ 3 — แผนภาพ Flowchart แสดงขั้นตอนการทำงาน</div>
+        <h2>Flowchart: ตั้งแต่กดปุ่ม "Generate" จนได้รูปดาวน์โหลดลงเครื่อง</h2>
+        <p>
+          นี่คือแผนผังการเดินทางของข้อมูลแบบ 12 ขั้นตอน อธิบายให้เห็นว่าเมื่อคุณพิมพ์คำว่า <em>"1girl, solo, anime"</em> แล้วกดปุ่ม มันเดินทางข้ามเน็ตไปไหนบ้าง:
+        </p>
+
+        <!-- กล่อง Flowchart 12 ขั้นตอน -->
+        <div class="steps-vertical">
+
+          <!-- Step 1 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 1</div>
+            <div class="step-main">
+              <h4>ผู้ใช้กรอกข้อมูลที่หน้าเว็บ (เครื่อง PC 2)</h4>
+              <p>ผู้ใช้เลือกโมเดล (Checkpoint), เลือก LoRA, พิมพ์คำสั่ง (Prompt) ซึ่งจะมีระบบแนะนำคำศัพท์แท็กช่วยพิมพ์ จากนั้นกดปุ่ม <strong>"Generate"</strong></p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>frontend/assets/app.js</code> ➔ ฟังก์ชัน <code>submitGeneration()</code></div>
+            </div>
+            <div class="step-image-preview">
+              <img src="images/ui_studio_initial.png" alt="หน้าจอสตูดิโอ" loading="lazy">
+              <span>ภาพที่ 1: หน้าจอ Studio กรอกค่าพารามิเตอร์</span>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (ส่งคำขอผ่านอินเทอร์เน็ต)</div>
+
+          <!-- Step 2 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 2</div>
+            <div class="step-main">
+              <h4>Frontend ยิงคำขอไปหา Nginx ประตูหน้าบ้าน</h4>
+              <p>เบราว์เซอร์ส่งข้อมูลแบบ JSON ผ่านคำสั่ง <code>fetch("/api/v1/jobs/generate")</code> พร้อมแนบตั๋วผ่านทาง <code>Authorization: Bearer &lt;Token&gt;</code> ไปหา Nginx</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>frontend/assets/app.js</code> ➔ ฟังก์ชัน <code>api()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (Nginx คัดแยกงาน)</div>
+
+          <!-- Step 3 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 3</div>
+            <div class="step-main">
+              <h4>Nginx ส่งต่อให้ Backend ข้ามเครื่อง (PC 2 ➔ PC 3)</h4>
+              <p>Nginx เห็นว่าเป็นคำขอขึ้นต้นด้วย <code>/api/</code> จึงทำการส่งต่อ (Proxy Pass) ข้ามสายแลน (Local LAN) ไปยังเครื่อง Backend ที่ไอพี <code>172.20.56.162:5000</code></p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>nginx/luma.conf</code> ➔ บรรทัด <code>location ^~ /api/ { proxy_pass http://luma_backend; }</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (ผู้จัดการรับเรื่องและจดบัญชี)</div>
+
+          <!-- Step 4 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 4</div>
+            <div class="step-main">
+              <h4>Backend รับงาน, ตรวจสิทธิ์ และบันทึกลงฐานข้อมูล</h4>
+              <p>Flask ตรวจสอบรหัสตั๋ว JWT ว่าผู้ใช้คนนี้มีสิทธิ์ไหม, สุ่มเลขไอดีของงาน (UUID เช่น <code>4c59629f-...</code>), จดลงฐานข้อมูล SQLite สถานะ <code>"queued"</code> (เข้าคิวรอ), แล้วตอบกลับหน้าเว็บทันทีด้วยรหัส <strong>HTTP 202 Accepted</strong></p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>backend/luma_backend/jobs.py</code> ➔ ฟังก์ชัน <code>generate()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (หน้าเว็บเริ่มรอ & พนักงานส่งของเริ่มวิ่ง)</div>
+
+          <!-- Step 5 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 5</div>
+            <div class="step-main">
+              <h4>หน้าเว็บเริ่มระบบถามวน (Polling) เพื่อดูหลอดโหลด</h4>
+              <p>หน้าเว็บพอรู้ว่าคำสั่งถูกรับแล้ว จะเปลี่ยนปุ่มเป็นรูปหมุนติ้ว ๆ แล้วส่งคำถามไปเช็กทุก ๆ 0.5 วินาที ว่า <em>"ภาพวาดเสร็จหรือยัง? ขอดูรูปตัวอย่างหน่อย"</em></p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>frontend/assets/app.js</code> ➔ ฟังก์ชัน <code>pollJob()</code> และ <code>pollProgress()</code></div>
+            </div>
+            <div class="step-image-preview">
+              <img src="images/ui_generation_progress.png" alt="หลอดโหลดความคืบหน้า" loading="lazy">
+              <span>ภาพที่ 2: หน้าจอหลอดโหลด % และปุ่ม Cancel</span>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (พนักงานวิ่งส่งสารข้ามไปหา AI)</div>
+
+          <!-- Step 6 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 6</div>
+            <div class="step-main">
+              <h4>คนส่งของ (Worker) ส่งงานไปเครื่องการ์ดจอ (PC 3 ➔ PC 1)</h4>
+              <p>พนักงานเบื้องหลัง <code>worker.py</code> วิ่งส่งคำขอ HTTP POST ข้ามเน็ต Hamachi ไปยังเครื่อง AI Engine ไอพี <code>25.23.21.202:8000</code> พร้อมรหัสลับพิเศษ <code>X-LUMA-Service-Token</code></p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>backend/luma_backend/worker.py</code> ➔ ฟังก์ชัน <code>process_job()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (เข้าห้องครัวการ์ดจอ)</div>
+
+          <!-- Step 7 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 7</div>
+            <div class="step-main">
+              <h4>AiEngine ล็อกคิว GPU ป้องกันการ์ดจอระเบิด (Queue Lock)</h4>
+              <p>FastAPI รับงานมาแล้ว จะตรวจสอบตัวล็อก <code>queue_manager.acquire()</code> เพื่อให้แน่ใจว่าการ์ดจอว่างอยู่ และไม่มีงานอื่นแย่งใช้ VRAM พร้อมกัน</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>ai-engine/queue_manager.py</code> ➔ เมธอด <code>acquire()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (เตาอบมหาเวทย์เริ่มทำงาน)</div>
+
+          <!-- Step 8 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 8</div>
+            <div class="step-main">
+              <h4>WebUI Forge รันการสุ่มภาพด้วย AI บนการ์ดจอ (CUDA)</h4>
+              <p>WebUI Forge (เสถียรด้วย Stability Matrix) รับค่าไปสั่งการ์ดจอ NVIDIA RTX คำนวณคณิตศาสตร์ตัวเลขล้าน ๆ ตัว สุ่มสัญญาณรบกวนตาม Seed วนลูป 28 รอบจนกลายเป็นภาพสวยงาม</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>ai-engine/forge_client.py</code> ➔ ฟังก์ชัน <code>generate_forge_image()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (ประกอบภาพและฝังสูตรลับ)</div>
+
+          <!-- Step 9 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 9</div>
+            <div class="step-main">
+              <h4>ถอดรหัสภาพ & ฝังพารามิเตอร์ลับลงในไฟล์ PNG (PNG Info)</h4>
+              <p>Forge ส่งภาพออกมาเป็นรหัส Base64 ทาง AiEngine จะแปลงกลับเป็นไฟล์ภาพ และใช้คำสั่ง <code>PngInfo</code> ยัดข้อความพารามิเตอร์ (Prompt, Seed, Sampler) ฝังลงในเนื้อไฟล์ภาพ ก่อนส่งไฟล์ Binary PNG กลับไปให้ Backend</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>ai-engine/app.py</code> ➔ บรรทัดที่ 557 ฝัง <code>pnginfo.add_text("parameters", ...)</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (เซฟรูปลงคลัง)</div>
+
+          <!-- Step 10 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 10</div>
+            <div class="step-main">
+              <h4>Backend บันทึกรูปลง Disk & ทำกุญแจลับ HMAC</h4>
+              <p>เครื่อง Backend รับข้อมูลภาพไบนารีมา เขียนเป็นไฟล์รูปภาพลงในโฟลเดอร์เก็บรูป (เช่น <code>MEDIA_ROOT/4c59629f.png</code>), อัปเดตฐานข้อมูลเป็น <code>"completed"</code> (100%), และสร้างลิงก์รูปภาพที่มีกุญแจลับเข้ารหัสป้องกันคนอื่นแอบดู</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>backend/luma_backend/worker.py</code> และ <code>jobs.py</code> ➔ ฟังก์ชัน <code>result_url()</code></div>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (ส่งรูปขึ้นหน้าจอ)</div>
+
+          <!-- Step 11 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 11</div>
+            <div class="step-main">
+              <h4>หน้าเว็บพบว่าเสร็จแล้ว โหลดรูปภาพมาแสดงผล</h4>
+              <p>Frontend ที่คอยส่งคำถามไปเช็ก ได้รับคำตอบว่า <em>"เสร็จแล้ว!"</em> พร้อมได้ลิงก์รูป <code>/media/...png?token=...</code> เบราว์เซอร์จึงดึงภาพผ่าน Nginx มาแสดงผลบนหน้าจอให้ผู้ใช้ชมทันที</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>frontend/assets/app.js</code> ➔ ฟังก์ชัน <code>showResult()</code></div>
+            </div>
+            <div class="step-image-preview">
+              <img src="images/ui_generated_result.png" alt="ผลลัพธ์ภาพที่ได้" loading="lazy">
+              <span>ภาพที่ 3: ภาพที่เจนเสร็จแล้วแสดงขึ้นบนหน้าจอ</span>
+            </div>
+          </div>
+
+          <div class="flow-arrow-down">⬇️ (กดรับภาพกลับบ้าน)</div>
+
+          <!-- Step 12 -->
+          <div class="step-box">
+            <div class="step-badge">ขั้นตอนที่ 12</div>
+            <div class="step-main">
+              <h4>ผู้ใช้กดปุ่ม "Download" ดึงภาพเก็บลงโฟลเดอร์เครื่อง</h4>
+              <p>เมื่อผู้ใช้กดปุ่ม Download สคริปต์พิเศษ <code>downloadActiveImage()</code> จะทำการดึงข้อมูลภาพมาแปลงเป็นก้อนเนื้อไบนารี Blob ในเบราว์เซอร์ เพื่อทะลุกฎความปลอดภัยของ Chrome แล้วเซฟเป็นชื่อ <code>luma-xxxx.png</code> ลงในโฟลเดอร์ Downloads ของคอมพิวเตอร์อย่างปลอดภัย 100%</p>
+              <div class="step-code-source">เกิดที่ไฟล์: <code>frontend/assets/app.js</code> ➔ ฟังก์ชัน <code>downloadActiveImage()</code></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- หมวดที่ 4: เจาะลึกโค้ดทีละบรรทัด -->
+      <section id="code-bridge-1" class="doc-section">
+        <div class="section-badge">บทที่ 4 — เจาะลึกโค้ดทีละบรรทัด (ส่งต่อไปที่ไหน ดึงมาจากไหน)</div>
+        <h2>เจาะลึกโค้ดจริงในระบบ: โค้ดไหนคุยกับโค้ดไหน?</h2>
+        <p>
+          สำหรับผู้ที่ต้องการเข้าใจว่า <strong>"ตัวแปรนี้มาจากไหน? บรรทัดนี้ส่งต่อไปที่ไฟล์ไหน?"</strong> นี่คือการแกะรอยโค้ดจริงแบบจับคู่ชนกัน:
+        </p>
+
+        <!-- คู่ที่ 1 -->
+        <div class="code-explain-card">
+          <div class="explain-header">
+            <span class="explain-num">จุดเชื่อมที่ 1</span>
+            <h3>หน้าเว็บ Frontend ส่งข้อมูลไปให้ Backend (ปุ่ม Generate)</h3>
+          </div>
+          <div class="explain-body">
+            <p><strong>ต้นทาง:</strong> ไฟล์ <code>frontend/assets/app.js</code> (บรรทัดที่ 710 - 745)</p>
+            <pre class="code-block"><code>// ดึงข้อความที่ผู้ใช้พิมพ์จากหน้าจอ
+const promptText = $("#prompt").value; 
+const widthVal = $("#width").value;     // เช่น 832
+const heightVal = $("#height").value;   // เช่น 1216
+
+// รวมข้อมูลเป็นก้อน JSON แล้วยิงไปหา Backend ผ่าน Nginx:
+const response = await api("/jobs/generate", {
+  method: "POST",
+  body: JSON.stringify({
+    prompt: promptText,
+    width: parseInt(widthVal),
+    height: parseInt(heightVal),
+    steps: 28,
+    model: state.activeModel
+  })
+});
+
+// ได้รับคำตอบกลับมาเป็น Job ID:
+console.log("ได้หมายเลขงานแล้ว:", response.job.id);
+pollJob(response.job.id); // เริ่มเปิดลูปคอยถามสถานะ</code></pre>
+
+            <p class="arrow-indicator">⬇️ ข้อมูลวิ่งข้ามสายแลนผ่าน Nginx ไปเข้าไฟล์นี้ ⬇️</p>
+
+            <p><strong>ปลายทางรับเข้า:</strong> ไฟล์ <code>backend/luma_backend/jobs.py</code> (บรรทัดที่ 65 - 88)</p>
+            <pre class="code-block"><code>@jobs_blueprint.post("/generate")
+@jwt_required()  # ตรวจสอบว่ามีตั๋ว Token หรือยัง
+def generate():
+    # 1. แกะข้อมูล JSON ที่ส่งมาจากหน้าเว็บ:
+    data = request.get_json()
+    prompt = parse_prompt(data.get("prompt"))
+    width = int(data.get("width", 512))
+    height = int(data.get("height", 512))
+
+    # 2. บันทึกงานลงตารางฐานข้อมูล SQLite:
+    job = Job(
+        id=str(uuid.uuid4()),      # สุ่มรหัสงาน เช่น 4c59629f-c7c6...
+        user_id=current_user_id(), # รหัสผู้ใช้ที่ล็อกอิน
+        prompt=prompt,
+        width=width,
+        height=height,
+        status="queued"            # ให้สถานะเริ่มต้นเป็น 'เข้าคิวรอ'
+    )
+    db.session.add(job)
+    db.session.commit()
+
+    # 3. สั่งให้คนส่งของ (Worker) แบกงานนี้ไปทำต่อที่เบื้องหลัง:
+    queue_job(current_app._get_current_object(), job.id)
+
+    # 4. รีบตอบกลับหน้าเว็บทันที ไม่ต้องรอภาพเสร็จ:
+    return jsonify({"job": serialized(job)}), 202</code></pre>
+          </div>
+        </div>
+
+        <!-- คู่ที่ 2 -->
+        <div class="code-explain-card" id="code-bridge-2">
+          <div class="explain-header">
+            <span class="explain-num">จุดเชื่อมที่ 2</span>
+            <h3>พนักงาน Backend (Worker) แบกงานข้ามเครื่องไปให้ AiEngine</h3>
+          </div>
+          <div class="explain-body">
+            <p><strong>ต้นทาง:</strong> ไฟล์ <code>backend/luma_backend/worker.py</code> (บรรทัดที่ 35 - 70)</p>
+            <pre class="code-block"><code># ดึงงานออกมาจากฐานข้อมูล
+job = db.session.get(Job, job_id)
+job.status = "processing" # เปลี่ยนสถานะเป็น 'กำลังทำ'
+
+# เตรียมหัวจดหมายลับ และไอพีเครื่องที่ 1 ที่มี AI:
+headers = {"X-LUMA-Service-Token": "luma-shared-secret-token"}
+base_url = "http://25.23.21.202:8000" # ไอพีเครื่องคุณ
+
+payload = {
+    "prompt": job.prompt,
+    "width": job.width,
+    "height": job.height,
+    "steps": job.steps,
+    "seed": job.seed
+}
+
+# 🚀 ส่ง HTTP POST ข้ามเน็ต Hamachi ไปหา AiEngine:
+response = requests.post(f"{base_url}/v1/generate", json=payload, headers=headers)
+
+# 💾 เมื่อ AiEngine ตอบกลับมาเป็นไฟล์รูปภาพ PNG ให้เซฟลง Harddisk:
+result_filename = f"{job.id}.png"
+result_path = Path(app.config["MEDIA_ROOT"]) / result_filename
+result_path.write_bytes(response.content) # บันทึกไฟล์ภาพ
+
+job.status = "completed" # เปลี่ยนสถานะเป็น 'เสร็จสมบูรณ์'
+db.session.commit()</code></pre>
+
+            <p class="arrow-indicator">⬇️ ข้อมูลวิ่งข้ามเครื่องมาถึงคอมพิวเตอร์เครื่องที่ 1 ⬇️</p>
+
+            <p><strong>ปลายทางรับเข้า:</strong> ไฟล์ <code>ai-engine/app.py</code> (บรรทัดที่ 501 - 550)</p>
+            <pre class="code-block"><code>@app.post("/v1/generate", dependencies=[private_api])
+def generate(payload: GenerateRequest):
+    # 1. ล็อกคิวการ์ดจอ ไม่ให้ใครแย่งกันใช้:
+    with queue_manager.acquire(timeout=60.0):
+        
+        # 2. เรียกฟังก์ชันสั่งเตาอบ WebUI Forge:
+        image, seed = generate_forge_image(
+            config,
+            prompt=payload.prompt,
+            negative_prompt=payload.negative_prompt,
+            width=payload.width,
+            height=payload.height,
+            seed=payload.seed,
+            steps=payload.steps
+        )
+        
+        # 3. นำภาพที่ได้มาฝังค่าพารามิเตอร์ลับ (PNG Info) ลงในไฟล์:
+        pnginfo = PngInfo()
+        pnginfo.add_text("parameters", f"{payload.prompt}\nSteps: {payload.steps}...")
+        
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", pnginfo=pnginfo)
+        
+        # 4. ส่งก้อนเนื้อไฟล์ภาพ Binary PNG คืนกลับไปให้ Backend:
+        return Response(content=buffer.getvalue(), media_type="image/png")</code></pre>
+          </div>
+        </div>
+
+        <!-- คู่ที่ 3 -->
+        <div class="code-explain-card" id="code-bridge-3">
+          <div class="explain-header">
+            <span class="explain-num">จุดเชื่อมที่ 3</span>
+            <h3>AiEngine สั่งเตาอบ WebUI Forge ในเครื่องตัวเอง</h3>
+          </div>
+          <div class="explain-body">
+            <p><strong>ต้นทาง:</strong> ไฟล์ <code>ai-engine/forge_client.py</code> (บรรทัดที่ 184 - 215)</p>
+            <pre class="code-block"><code>def generate_forge_image(config, prompt, neg_prompt, width, height, seed, steps, ...):
+    # จัดเตรียมฟอร์มคำสั่งตามที่ WebUI Forge ต้องการ:
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": neg_prompt,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "seed": seed,
+        "sampler_name": "Euler a",
+        "override_settings": {
+            "sd_model_checkpoint": "waiIllustriousSDXL_v170.safetensors"
+        }
+    }
+    
+    # ยิงคำขอไปที่พอร์ตเตาอบภายในเครื่องตัวเอง:
+    response = requests.post("http://127.0.0.1:7860/sdapi/v1/txt2img", json=payload)
+    
+    # ถอดรหัสรูปภาพ Base64 ออกมาเป็นวัตถุภาพ PIL Image:
+    return decode_forge_image(response, seed)</code></pre>
+          </div>
+        </div>
+
+        <!-- คู่ที่ 4: การแก้ปัญหาดาวน์โหลด -->
+        <div class="code-explain-card" id="code-bridge-5">
+          <div class="explain-header">
+            <span class="explain-num">จุดเชื่อมที่ 4</span>
+            <h3>แก้ปัญหาดาวน์โหลดภาพ: เทคนิคแปลงเป็น Blob ในเบราว์เซอร์</h3>
+          </div>
+          <div class="explain-body">
+            <p>
+              <strong>ปัญหาเดิม:</strong> เมื่อก่อนเวลากดปุ่ม Download บนเบราว์เซอร์ Chrome ตัวเบราว์เซอร์จะปฏิเสธการเซฟรูป เพราะเห็นว่ารูปภาพอยู่คนละไอพีกับหน้าเว็บ (Cross-Origin Block) ทำให้รูปไม่โหลดลงโฟลเดอร์ Downloads หรือโหลดออกมาเป็นไฟล์ไม่มีนามสกุล
+            </p>
+            <p><strong>โค้ดที่ได้รับการแก้ไขแล้ว:</strong> ไฟล์ <code>frontend/assets/app.js</code> (บรรทัดที่ 1187 - 1235)</p>
+            <pre class="code-block"><code>async function downloadActiveImage(e) {
+  e.preventDefault();
+  const currentSrc = $("#resultImage").src; // ดึงที่อยู่ของรูปภาพ
+
+  // 1. ดึงข้อมูลภาพดิบมาแปลงเป็น Binary Blob ในแรมของเบราว์เซอร์ก่อน:
+  const res = await fetch(currentSrc);
+  const rawBlob = await res.blob();
+  const pngBlob = new Blob([rawBlob], { type: "image/png" });
+
+  // 2. สร้าง URL เสมือนภายในเครื่อง (ขึ้นต้นด้วย blob:... ซึ่งเป็น Same-Origin 100%):
+  const blobUrl = URL.createObjectURL(pngBlob);
+
+  // 3. สร้างแท็กดาวน์โหลดล่องหน แล้วสั่งคลิกอัตโนมัติ:
+  const tempAnchor = document.createElement("a");
+  tempAnchor.href = blobUrl;
+  tempAnchor.download = `luma-${jobId}.png`; // บังคับนามสกุล .png
+  document.body.appendChild(tempAnchor);
+  tempAnchor.click(); // 💥 บังคับ Chrome เด้งแถบดาวน์โหลดทันที!
+  document.body.removeChild(tempAnchor);
+  
+  URL.revokeObjectURL(blobUrl); // คืนแรม
+  showToast("บันทึกไฟล์ภาพ .png ลงในคอมพิวเตอร์เรียบร้อย!");
+}</code></pre>
+          </div>
+        </div>
+
+        <!-- คู่ที่ 5: การประมวลผลฟิลเตอร์ภาพและการพิสูจน์คณิตศาสตร์ (API Workshop Algorithms) -->
+        <div class="code-explain-card" id="code-bridge-filters">
+          <div class="explain-header">
+            <span class="explain-num">จุดเชื่อมที่ 5</span>
+            <h3>การประมวลผลฟิลเตอร์ภาพตามโจทย์ API Workshop: ผลลัพธ์และสูตรคณิตศาสตร์จริง</h3>
+          </div>
+          <div class="explain-body">
+            <p>
+              ภาพตัวอย่างด้านล่างถูกสร้างขึ้นจากโค้ดจริงในระบบ (<code>dev_provider.py</code> และ <code>filters.py</code>) แสดงการทำงานของอัลกอริทึมทั้ง 4 แบบที่แปลงภาพต้นฉบับออกมาเป็นผลลัพธ์:
+            </p>
+
+            <div class="comparison-grid">
+              <!-- ต้นฉบับ -->
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">ORIGINAL</span>
+                  <img src="images/95.png" alt="Original AI Generated Image" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>ภาพต้นฉบับจริง (SDXL + Shiraori LoRA)</strong>
+                  <p>เจนจากโมเดล <code>waiIllustriousSDXL_v170</code> ร่วมกับ LoRA Shiraori (1024x1024, Steps 15, Euler)</p>
+                </div>
+              </div>
+
+              <!-- Grayscale -->
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">ITU-R BT.601</span>
+                  <img src="images/luma-95aedfd0-grayscale.png" alt="Grayscale Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>1. Grayscale (ขาวดำ)</strong>
+                  <p><code>Y = 0.299R + 0.587G + 0.114B</code><br>คำนวณตามการรับรู้ความสว่างของสายตามนุษย์</p>
+                </div>
+              </div>
+
+              <!-- Edge -->
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">LAPLACIAN</span>
+                  <img src="images/luma-95aedfd0-edge.png" alt="Edge Detection Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>2. Edge Detection (ตัดเส้น)</strong>
+                  <p>2D Spatial Gradient Convolution หาขอบลายเส้นตัวละครแล้วกลับสีขาวดำ</p>
+                </div>
+              </div>
+
+              <!-- Blur -->
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">GAUSSIAN</span>
+                  <img src="images/luma-95aedfd0-blur.png" alt="Gaussian Blur Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>3. Gaussian Blur (เบลอ)</strong>
+                  <p>2D Kernel Spatial Smoothing รัศมี 4px กรองตัดสัญญาณรบกวน</p>
+                </div>
+              </div>
+
+              <!-- Invert -->
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">ARITHMETIC</span>
+                  <img src="images/luma-95aedfd0-invert.png" alt="Color Inversion Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>4. Color Inversion (กลับสี)</strong>
+                  <p><code>255 - X</code> กลับค่าสีทุก Channel ให้กลายเป็นสีคู่ตรงข้ามแนวไซเบอร์</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- กล่องสาธิตการแกะเมทาดาต้าจริง (PNG Info Demonstration) -->
+            <div style="margin-top: 2rem; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 12px; padding: 1.5rem;">
+              <h4 style="color: var(--accent-cyan); margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.5rem;">
+                🔍 <strong>ผลการอ่านค่าเมทาดาต้าจากภาพตัวอย่างจริง (Live PNG Info Metadata Extraction):</strong>
+              </h4>
+              <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+                เมื่ออัปโหลดไฟล์ภาพจริง <code>95.png</code> หรือไฟล์ทดสอบ <code>test_sd_param.png</code> เข้าสู่เครื่องมือ PNG Info โมดูล <code>png_parser.py</code> สามารถถอดรหัสข้อความลับที่ฝังอยู่ใน Chunks ของรูปภาพออกมาเป็น JSON พร้อมส่งต่อให้ Text2Img / Img2Img ได้ทันที:
+              </p>
+              
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+                <div style="background: rgba(0, 0, 0, 0.4); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--accent-purple);">
+                  <strong style="color: #fff; display: block; margin-bottom: 0.4rem;">🌸 ตัวอย่างที่ 1: ภาพเจนสด (95.png)</strong>
+                  <div style="font-size: 0.8rem; font-family: monospace; color: #cbd5e1; line-height: 1.6;">
+                    <div>• <strong>Prompt:</strong> masterpiece, &lt;lora:...&gt;, Shiraori, cowboy shot, sakura</div>
+                    <div>• <strong>Negative:</strong> low quality</div>
+                    <div>• <strong>Steps / Sampler:</strong> 15 / Euler (normal)</div>
+                    <div>• <strong>CFG Scale / Seed:</strong> 5.0 / 3924559915</div>
+                    <div>• <strong>Size / Model:</strong> 1024x1024 / waiIllustriousSDXL_v170</div>
+                    <div>• <strong>LoRA ID:</strong> 6890ff69-554a-4c4f-89cb-a8fc90325ea2.TA_trained</div>
+                  </div>
+                </div>
+
+                <div style="background: rgba(0, 0, 0, 0.4); padding: 1rem; border-radius: 8px; border-left: 3px solid var(--accent-cyan);">
+                  <strong style="color: #fff; display: block; margin-bottom: 0.4rem;">🧪 ตัวอย่างที่ 2: ภาพทดสอบ (test_sd_param.png)</strong>
+                  <div style="font-size: 0.8rem; font-family: monospace; color: #cbd5e1; line-height: 1.6;">
+                    <div>• <strong>Prompt:</strong> illustration, incredibly absurdres, 1girl, solo, sunglasses, blonde hair...</div>
+                    <div>• <strong>Negative:</strong> (worst quality, low quality:1.4), monochrome...</div>
+                    <div>• <strong>Steps / Sampler:</strong> 35 / Euler a (Automatic)</div>
+                    <div>• <strong>CFG Scale / Seed:</strong> 7.0 / 123456789</div>
+                    <div>• <strong>Size / Model:</strong> 1024x1024 / SDXL</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- หมวดที่ 5: แกลเลอรีภาพตัวอย่างจริง -->
+      <section id="gallery-preview" class="doc-section">
+        <div class="section-badge">บทที่ 5 — ภาพตัวอย่างการทำงานจริงในระบบ</div>
+        <h2>ภาพตัวอย่างการทำงานจริงของระบบ Project LUMA</h2>
+        <p>
+          นี่คือภาพถ่ายหน้าจอจริงจากการทดสอบระบบและฟังก์ชันต่าง ๆ ใน Project LUMA:
+        </p>
+
+        <div class="real-gallery-grid">
+          <!-- รูป 1: Danbooru Autocomplete -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_danbooru_autocomplete.png" alt="Danbooru Tag Popup" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>1. ระบบแนะนำคำ Danbooru Autocomplete</strong>
+              <p>เมื่อพิมพ์คำสั้น ๆ จะมีกล่องลอยขึ้นมาแนะนำแท็กหมวดหมู่ต่าง ๆ พร้อมยอดการใช้งาน ช่วยให้พิมพ์คำสั่งได้สะดวก</p>
+            </div>
+          </div>
+
+          <!-- รูป 2: Checkpoint Selector -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_model_dropdown.png" alt="Model Dropdown" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>2. การเลือกโมเดล Checkpoint (SDXL)</strong>
+              <p>หน้าต่างเลือกโมเดลหลัก พร้อมรูปการ์ดตัวอย่าง สามารถค้นหาชื่อโมเดลและเลือกใช้งานได้ทันที</p>
+            </div>
+          </div>
+
+          <!-- รูป 3: LoRA Selector -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_lora_selector.png" alt="LoRA Selector" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>3. กล่องเลือก LoRA สไตล์และตัวละคร</strong>
+              <p>เมื่อคลิกเลือก LoRA ระบบจะใส่โค้ด <code>&lt;lora:ชื่อ:1.0&gt;</code> ลงในช่อง Prompt ให้อัตโนมัติโดยไม่ซ้ำซ้อน</p>
+            </div>
+          </div>
+
+          <!-- รูป 4: Live Progress Bar -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_generation_progress.png" alt="Live Progress" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>4. แถบหลอดโหลดความคืบหน้าแบบ Real-Time</strong>
+              <p>แสดงเปอร์เซ็นต์ขั้นตอนการสุ่มภาพ (Sampling Steps) และมีปุ่ม Cancel สำหรับกดยกเลิกกลางคันได้ทันที</p>
+            </div>
+          </div>
+
+          <!-- รูป 5: Live Generation Result -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_generated_result.png" alt="Live Generation Result" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>5. หน้าจอผลลัพธ์การสร้างภาพสด (Live Generation Result)</strong>
+              <p>ผลลัพธ์การสร้างภาพจริงบนหน้าเว็บ พร้อมการแสดงผลพารามิเตอร์เต็มรูปแบบ ปลอดภัยผ่าน JWT Media Token</p>
+            </div>
+          </div>
+
+          <!-- รูป 6: Edge Detection Filter -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_edge_filter_applied.png" alt="Edge Filter" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>6. ฟิลเตอร์ตัดเส้นขอบ (Edge Detection)</strong>
+              <p>หนึ่งในฟิลเตอร์ตกแต่งภาพด่วนด้านล่างรูปภาพ ช่วยแปลงภาพเป็นลายเส้นขาวดำสำหรับการนำไปดราฟต์ต่อ</p>
+            </div>
+          </div>
+
+          <!-- รูป 7: PNG Info Tool -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_png_info.png" alt="PNG Info Tool" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>7. เครื่องมือถอดรหัสลับภาพ PNG Info</strong>
+              <p>ลากรูปภาพมาวาง แล้วโปรแกรมจะอ่านค่า Prompt, Negative, Seed, และ Sampler ที่ฝังอยู่ในภาพออกมาแสดง พร้อมปุ่มกดคัดลอก</p>
+            </div>
+          </div>
+
+          <!-- รูป 8: Creations Gallery -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/ui_my_creations.png" alt="Creations Gallery" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>8. คลังประวัติผลงานในระบบ (My Creations Gallery)</strong>
+              <p>หน้าแสดงประวัติภาพทั้งหมดที่ผู้ใช้เคยเจนไว้ บันทึกลงใน SQLite บนเครื่อง Backend อย่างเป็นระเบียบ</p>
+            </div>
+          </div>
+
+          <!-- รูป 9: AI Upscaling 2x Sample -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/sample_upscale_2x.png" alt="Live Upscale 2x Sample" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>9. ตัวอย่างภาพขยายขนาด AI Upscale (2x Lanczos)</strong>
+              <p>ภาพที่ผ่านการขยายขนาดเป็น 1024x1024 พร้อมปรับปรุงไมโครคอนทราสต์และความคมชัดอย่างประณีต</p>
+            </div>
+          </div>
+
+          <!-- รูป 10: 95.png Production Result -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/95.png" alt="Live Production Generation 95.png" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>10. ผลลัพธ์ภาพเจนจริงคุณภาพสูง 1024x1024 (95.png)</strong>
+              <p>ภาพที่สร้างขึ้นจริงผ่าน WebUI Forge ด้วยโมเดล <code>waiIllustriousSDXL_v170</code> ผสาน LoRA <code>Shiraori</code> (Euler, Steps 15, Seed 3924559915)</p>
+            </div>
+          </div>
+
+          <!-- รูป 11: test_sd_param.png SD Parameters Asset -->
+          <div class="gallery-item">
+            <div class="gallery-img-wrap">
+              <img src="images/test_sd_param.png" alt="SD Parameter Test Sample" loading="lazy">
+            </div>
+            <div class="gallery-caption">
+              <strong>11. ไฟล์ตัวอย่างชุดพารามิเตอร์ทดสอบ (test_sd_param.png)</strong>
+              <p>ไฟล์ภาพมาตรฐานฝังข้อมูล Stable Diffusion เต็มรูปแบบ สำหรับทดสอบฟังก์ชันลากวางถอดรหัสพารามิเตอร์ในเครื่องมือ PNG Info</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- หมวดที่ 6: สรุปบั๊กที่เคยเจอและวิธีแก้ -->
+      <section id="troubleshooting-recap" class="doc-section">
+        <div class="section-badge">บทที่ 6 — รวมบั๊กและการแก้ปัญหาที่ผ่านมา</div>
+        <h2>บันทึกปัญหาที่เคยเกิดขึ้นและวิธีแก้ไข (Troubleshooting Log)</h2>
+        
+        <div class="trouble-list">
+          <div class="trouble-card">
+            <div class="trouble-title">❌ ปัญหา 1: รูปเจนเสร็จแล้ว แต่บนหน้าเว็บขึ้นรูปแตก 404 (Not Found)</div>
+            <p><strong>สาเหตุ:</strong> ในคอนฟิก Nginx มีคำสั่งเช็กนามสกุล <code>.png</code> ซึ่งมีลำดับความสำคัญสูงกว่า Nginx จึงพยายามไปหารูปในเครื่องตัวเอง ทั้งที่รูปจริงถูกเซฟอยู่บนเครื่อง Backend</p>
+            <p><strong>วิธีแก้:</strong> เพิ่มเครื่องหมาย <code>^~</code> ข้างหน้าพาธ เป็น <code>location ^~ /media/</code> เพื่อบังคับให้ Nginx ส่งคำขอไฟล์รูปข้ามไปยังเครื่อง Backend ทันที</p>
+          </div>
+
+          <div class="trouble-card">
+            <div class="trouble-title">❌ ปัญหา 2: กดปุ่ม Download แล้วไฟล์ไม่โหลดลงโฟลเดอร์ หรือไม่มีนามสกุล .png</div>
+            <p><strong>สาเหตุ:</strong> นโยบายความปลอดภัย Cross-Origin ของ Google Chrome จะยกเลิกแอตทริบิวต์ดาวน์โหลด หากรูปมาจากคนละเครื่องกับหน้าเว็บ</p>
+            <p><strong>วิธีแก้:</strong> เขียนฟังก์ชัน <code>downloadActiveImage()</code> แปลงรูปภาพเป็นไบนารี Blob ในแรมของเบราว์เซอร์ก่อน แล้วสั่งดาวน์โหลดแบบ Local ซึ่งผ่านกฎความปลอดภัย 100%</p>
+          </div>
+
+          <div class="trouble-card">
+            <div class="trouble-title">❌ ปัญหา 3: รันโปรแกรมซ้ำแล้วขึ้น [Errno 10048] Address already in use</div>
+            <p><strong>สาเหตุ:</strong> พอร์ต 8000 ถูกโปรแกรมเดิมจองไว้เบื้องหลัง</p>
+            <p><strong>วิธีแก้:</strong> สั่ง Kill Process เก่า แล้วสร้างไฟล์ <code>run_aiengine.bat</code> ให้เปิดหน้าต่าง CMD รันเดี่ยว ๆ เพื่อให้ผู้ใช้มองเห็น Log และกดปิดได้ด้วยตัวเอง</p>
+          </div>
+
+          <div class="trouble-card">
+            <div class="trouble-title">❌ ปัญหา 4: เครื่องเพื่อนเปิดหน้าเว็บไม่ได้ (ขึ้น Offline / Failed to fetch)</div>
+            <p><strong>สาเหตุ:</strong> เพื่อนดับเบิลคลิกไฟล์ <code>index.html</code> โดยตรง ทำให้เบราว์เซอร์ทำงานในโหมด <code>file:///</code> ซึ่งโดนระบบความปลอดภัยบล็อกการเรียก API</p>
+            <p><strong>วิธีแก้:</strong> ให้เพื่อนเปิดเว็บผ่านทาง Nginx Web Server เช่น <code>http://172.20.56.163/</code> หรือ <code>http://172.20.56.163:8080/</code> แทน</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ส่วนท้าย (Footer) -->
+      <footer class="doc-footer">
+        <div class="footer-inner">
+          <p><strong>Project LUMA</strong> — ระบบปัญญาประดิษฐ์สร้างสรรค์ภาพวาดอนิเมะแบบกระจายศูนย์ 3 คอมพิวเตอร์</p>
+          <p class="copyright">จัดทำขึ้นเพื่อให้ทุกคนในทีมเข้าใจการทำงานของโค้ดทุกส่วนอย่างถ่องแท้.</p>
+        </div>
+      </footer>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

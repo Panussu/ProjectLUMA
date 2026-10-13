@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project LUMA — เจาะลึกโค้ดทุกไฟล์ ทุกบรรทัด ทุกโมดูล (Code Deep Dive Encyclopedia)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .deep-dive-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 2.2rem;
+      margin-bottom: 2.8rem;
+      backdrop-filter: blur(10px);
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .deep-dive-card:hover {
+      border-color: rgba(99, 102, 241, 0.55);
+      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.45);
+    }
+    .deep-dive-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 1.25rem;
+      margin-bottom: 1.5rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .deep-dive-file-title {
+      font-size: 1.48rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      margin-top: 0.35rem;
+    }
+    .file-badge-module {
+      font-size: 0.74rem;
+      font-family: var(--font-mono);
+      padding: 0.25rem 0.65rem;
+      border-radius: 4px;
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      display: inline-block;
+      margin-bottom: 0.4rem;
+    }
+    .file-badge-lines {
+      font-size: 0.74rem;
+      font-family: var(--font-mono);
+      padding: 0.25rem 0.65rem;
+      border-radius: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      display: inline-block;
+      margin-bottom: 0.4rem;
+    }
+    .function-list-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1.4rem;
+      margin-top: 1.25rem;
+    }
+    .function-item {
+      background: rgba(10, 12, 16, 0.72);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.35rem;
+      transition: border-color 0.2s ease;
+    }
+    .function-item:hover {
+      border-color: rgba(56, 189, 248, 0.45);
+    }
+    .function-item-title {
+      font-size: 1.12rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--font-mono);
+    }
+    .function-io-tag {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-bottom: 0.8rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 0.45rem 0.8rem;
+      border-radius: 6px;
+      border-left: 3px solid var(--accent-indigo);
+    }
+    .function-io-tag strong {
+      color: #e2e8f0;
+    }
+    .nav-switch-bar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    .nav-switch-btn {
+      padding: 0.65rem 1.35rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      transition: all 0.2s ease;
+    }
+    .btn-active-tab {
+      background: var(--accent-indigo);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    }
+    .btn-inactive-tab {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid var(--border-medium);
+    }
+    .btn-inactive-tab:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .code-explain-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.1rem 0;
+      font-size: 0.86rem;
+    }
+    .code-explain-table th {
+      background: rgba(99, 102, 241, 0.16);
+      color: #c7d2fe;
+      text-align: left;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-medium);
+    }
+    .code-explain-table td {
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      vertical-align: top;
+    }
+    .code-explain-table td code {
+      color: var(--accent-cyan);
+      font-size: 0.83rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="cyber-grid"></div>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-badge">สารานุกรมโค้ดระดับเจาะลึก</span>
+        <h1 class="brand-title">LUMA <span>CODE DEEP DIVE</span></h1>
+      </div>
+      <div class="header-search">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="quickSearch" placeholder="พิมพ์ชื่อไฟล์, ชื่อฟังก์ชัน, คลาส, หรือตัวแปรเพื่อค้นหา..." autocomplete="off">
+        <span class="search-shortcut">Ctrl+K</span>
+      </div>
+      <div class="header-tags">
+        <a href="index.html" class="nav-switch-btn btn-inactive-tab">⬅️ สลับไปหน้าแผนผัง Flowchart</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="doc-layout">
+    <!-- Sidebar -->
+    <aside class="doc-sidebar">
+      <nav class="nav-tree">
+        <div class="nav-group">
+          <span class="nav-group-title">การเลือกหน้าเอกสาร</span>
+          <a href="index.html" class="nav-link"><span class="dot"></span>1. แผนผังสถาปัตยกรรม & Flowchart</a>
+          <a href="#intro" class="nav-link active"><span class="dot"></span>2. สารานุกรมเจาะลึกโค้ดทุกไฟล์</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">1. AiEngine (PC 1: พอร์ต 8000)</span>
+          <a href="#ai-app" class="nav-link"><span class="dot"></span>app.py (หัวใจหลัก API 16 เราต์)</a>
+          <a href="#ai-dev-provider" class="nav-link"><span class="dot"></span>dev_provider.py (ระบบจำลองสร้างภาพ)</a>
+          <a href="#ai-exceptions" class="nav-link"><span class="dot"></span>exceptions.py (ระบบแจ้ง Error)</a>
+          <a href="#ai-forge-client" class="nav-link"><span class="dot"></span>forge_client.py (คุม WebUI Forge)</a>
+          <a href="#ai-queue-manager" class="nav-link"><span class="dot"></span>queue_manager.py (ล็อกคิวการ์ดจอ)</a>
+          <a href="#ai-scanner" class="nav-link"><span class="dot"></span>scanner.py (สแกนโมเดล SDXL/LoRA)</a>
+          <a href="#ai-styles" class="nav-link"><span class="dot"></span>styles.py (พรีเซ็ตสไตล์ภาพ 10 แบบ)</a>
+          <a href="#ai-png-parser" class="nav-link"><span class="dot"></span>png_parser.py (แกะค่า PNG Metadata)</a>
+          <a href="#ai-filters" class="nav-link"><span class="dot"></span>filters.py (ฟิลเตอร์ภาพ 4 แบบ)</a>
+          <a href="#ai-tag-service" class="nav-link"><span class="dot"></span>tag_service.py (แนะคำ Danbooru)</a>
+          <a href="#ai-validators" class="nav-link"><span class="dot"></span>validators.py (ตรวจฟอร์ม Pydantic)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">2. Backend (PC 3: พอร์ต 5000)</span>
+          <a href="#be-run" class="nav-link"><span class="dot"></span>run.py (เซิร์ฟเวอร์ Waitress 8 เธรด)</a>
+          <a href="#be-init" class="nav-link"><span class="dot"></span>__init__.py (สร้างแอป/ย้ายตาราง DB)</a>
+          <a href="#be-config" class="nav-link"><span class="dot"></span>config.py (อ่านค่า .env)</a>
+          <a href="#be-extensions" class="nav-link"><span class="dot"></span>extensions.py (ตัวแปร db กลาง)</a>
+          <a href="#be-models" class="nav-link"><span class="dot"></span>models.py (ตาราง User และ Job)</a>
+          <a href="#be-auth" class="nav-link"><span class="dot"></span>auth.py (สมัคร/ล็อกอิน JWT)</a>
+          <a href="#be-jobs" class="nav-link"><span class="dot"></span>jobs.py (คิวงาน/ลิงก์ HMAC)</a>
+          <a href="#be-worker" class="nav-link"><span class="dot"></span>worker.py (ส่งงานข้ามเครื่องเน็ต)</a>
+          <a href="#be-ai-proxy" class="nav-link"><span class="dot"></span>ai_proxy.py (พร็อกซีส่งต่อ 16 เส้นทาง)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">3. Frontend (PC 2: พอร์ต 8080)</span>
+          <a href="#fe-app" class="nav-link"><span class="dot"></span>assets/app.js (สมองกลฝั่งเบราว์เซอร์)</a>
+          <a href="#fe-danbooru" class="nav-link"><span class="dot"></span>danbooru_tags.json (พจนานุกรมคำแท็ก)</a>
+          <a href="#fe-index" class="nav-link"><span class="dot"></span>index.html (โครงสร้างหน้าเว็บ UI)</a>
+          <a href="#fe-styles" class="nav-link"><span class="dot"></span>assets/styles.css (ระบบธีม Glassmorphism)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">4. Nginx (PC 2: พอร์ต 80/8080)</span>
+          <a href="#nx-luma" class="nav-link"><span class="dot"></span>luma.conf (กฎกระจายเส้นทาง ^~)</a>
+          <a href="#nx-nginx" class="nav-link"><span class="dot"></span>nginx.conf (คอนฟิกหลักระบบ Windows)</a>
+          <a href="#nx-docker" class="nav-link"><span class="dot"></span>docker.conf (คอนฟิกสำหรับ Docker)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">5. สคริปต์ควบคุมระบบ (.bat)</span>
+          <a href="#sc-aiengine" class="nav-link"><span class="dot"></span>run_aiengine.bat (เปิด AI Engine)</a>
+          <a href="#sc-nginx" class="nav-link"><span class="dot"></span>run_nginx.bat (เปิด Nginx พร้อมตรวจ PID)</a>
+          <a href="#sc-stop" class="nav-link"><span class="dot"></span>stop_nginx.bat (ปิด Nginx สะอาดหมดจด)</a>
+          <a href="#sc-check" class="nav-link"><span class="dot"></span>check_nginx_log.bat (ดู Log สด)</a>
+          <a href="#sc-overview" class="nav-link"><span class="dot"></span>open_system_overview.bat (เมนูคู่มือ)</a>
+        </div>
+
+        <div class="nav-group">
+          <span class="nav-group-title">6. การทดสอบรันเครื่องเดียว (Local Run)</span>
+          <a href="#live-local-run" class="nav-link"><span class="dot"></span>หลักฐานการรัน Local &amp; แกลเลอรีสด</a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="doc-content">
+      <section id="intro" class="doc-section">
+        <div class="nav-switch-bar">
+          <a href="index.html" class="nav-switch-btn btn-inactive-tab">📊 1. หน้าภาพรวม สถาปัตยกรรม & Flowchart</a>
+          <a href="code-deep-dive.html" class="nav-switch-btn btn-active-tab">🔬 2. สารานุกรมเจาะลึกโค้ดทุกไฟล์ ทุกบรรทัด</a>
+        </div>
+
+        <div class="section-badge">คู่มือระดับลึกที่สุด (The Complete Codebase Encyclopedia)</div>
+        <h2>เจาะลึกโค้ดแยกตามหน้าที่ ทุกไฟล์ ทุกฟังก์ชันใน Project LUMA</h2>
+        <p class="lead-text">
+          หน้านี้ถูกสร้างขึ้นเพื่อตอบโจทย์ผู้ที่ต้องการเข้าใจระบบแบบทะลุปรุโปร่ง โดยอธิบายละเอียดทีละไฟล์ว่า: 
+          <strong>"ไฟล์นี้มีไว้ทำไม?", "ฟังก์ชันแต่ละตัวข้างในทำงานอย่างไร?", "ดึงข้อมูลจากไหน?", และ "ส่งต่อข้อมูลไปให้ใคร?"</strong>
+          รวบรวมครบถ้วนทุกองค์ประกอบจากโค้ดจริงกว่า 25 ไฟล์ของโปรเจกต์ครับ
+        </p>
+      </section>
+
+      <!-- ====================================================================
+           PART 1: AI ENGINE
+           ==================================================================== -->
+      <section class="doc-section">
+        <div class="section-badge">หมวดที่ 1 — เครื่องที่ 1 (PC 1: IP 25.23.21.202 พอร์ต 8000)</div>
+        <h2>AiEngine (FastAPI Microservice & Hardware Controller)</h2>
+        <p class="lead-text">
+          ทำหน้าที่เป็นสะพานห่อหุ้มการ์ดจอ (GPU Wrapper) มีไฟล์ย่อยทั้งหมด 11 ไฟล์ ทำงานประสานกันเพื่อสั่งการ Stable Diffusion WebUI Forge หรือโหมดจำลองภาพ:
+        </p>
+
+        <!-- 1.1 app.py -->
+        <div class="deep-dive-card" id="ai-app">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / app.py</span>
+              <span class="file-badge-lines">1,058 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 app.py — ศูนย์กลางควบคุม API และเราต์ทั้งหมดของ AI</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เป็นจุดเริ่มต้น (Entry Point) ของ AiEngine ทั้งหมด สร้างเว็บแอปด้วย FastAPI คอยเปิดรับคำขอจาก Backend เครื่องที่ 3 ตรวจสอบความปลอดภัย จัดการ Middleware จำกัดขนาดไฟล์ และเชื่อมโยงโมดูลย่อยทั้งหมดเข้าด้วยกัน
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>create_app(test_config=None) -> FastAPI</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ตัวแปรสภาพแวดล้อมจาก <code>.env</code> หรือพารามิเตอร์ <code>test_config</code></span> | 
+                <span><strong>Output:</strong> อินสแตนซ์ของ FastAPI Application ที่พร้อมเปิดให้บริการ</span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong></p>
+              <ul>
+                <li>อ่านคอนฟิกต่าง ๆ เช่น <code>FORGE_URL</code> (127.0.0.1:7860), <code>SERVICE_TOKEN</code>, โฟลเดอร์โมเดล <code>MODELS_DIR</code>, และจำนวนคิวสูงสุด</li>
+                <li>สร้างอินสแตนซ์ของ <code>GenerationQueueManager</code> แล้วเก็บไว้ใน <code>app.state.queue</code> เพื่อให้ทุกเส้นทางใช้คิวตัวเดียวกัน</li>
+                <li>ลงทะเบียนตัวจัดการ Exception กลาง: <code>ApiError</code>, <code>RequestValidationError</code>, และ <code>StarletteHTTPException</code> แปลงเป็น JSON รูปแบบมาตรฐาน</li>
+                <li>ติดตั้ง <code>@app.middleware("http") limit_request_size</code> ป้องกันการส่งไฟล์ใหญ่เกิน 16MB ถล่มเซิร์ฟเวอร์</li>
+                <li>ลงทะเบียนเราต์ API ทั้งหมด 16 เส้นทาง</li>
+              </ul>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>authenticate_private_api (private_api Security Dependency)</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> HTTP Header: <code>X-LUMA-Service-Token</code></span> | 
+                <span><strong>Output:</strong> ผ่านฉลุย / โยน <code>ApiError("unauthorized", 401)</code></span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> ดักตรวจคำขอทุกครั้งก่อนจะเข้าไปถึงฟังก์ชันสั่งงานการ์ดจอ หากค่าไม่ตรงกับ <code>config["SERVICE_TOKEN"]</code> จะปฏิเสธทันที ป้องกันไม่ให้บุคคลภายนอกในวงเน็ตยิงสั่งการ์ดจอเราโดยไม่ผ่านระบบสิทธิ์
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.get("/health")</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ไม่มี</span> | 
+                <span><strong>Output:</strong> JSON แสดงสถานะ <code>{"status": "ok", "provider": "...", "queue": {...}}</code></span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong> วิ่งไปทดสอบเชื่อมต่อกับ Forge ที่พอร์ต 7860 หาก Forge ไม่ได้เปิดอยู่จะส่งสถานะ 503 Service Unavailable กลับไป เพื่อให้ระบบ Backend รู้ล่วงหน้าว่าเตาอบการ์ดจอยังไม่พร้อม</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.post("/v1/generate")</code> (เส้นทางสร้างภาพตัวหลัก)</div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> <code>payload: GenerateRequest</code> (Prompt, Steps, CFG, Seed, Checkpoint, LoRA ฯลฯ)</span> | 
+                <span><strong>Output:</strong> <code>Response(content=PNG_Bytes, media_type="image/png")</code> พร้อมข้อมูล Headers</span>
+              </div>
+              <p><strong>กระบวนการทำงานแบบละเอียด:</strong></p>
+              <ol>
+                <li>ส่ง Prompt เข้า <code>apply_style_preset()</code> ใน <code>styles.py</code> เพื่อเสริมคำคมชัดตามสไตล์ที่เลือก</li>
+                <li>คำนวณ Seed ด้วย <code>prompt_seed()</code> ถ้าผู้ใช้เว้นว่างไว้จะสร้างจากแฮช SHA-256 ของ Prompt แบบ Deterministic</li>
+                <li>เข้าคิวการ์ดจอด้วย <code>with queue_manager.acquire():</code> (ถ้ามีงานอื่นรันอยู่ จะรอจนกว่าคิวจะว่าง)</li>
+                <li>เรียก <code>generate_forge_image()</code> ใน <code>forge_client.py</code> เพื่อยิงคำสั่งไปยัง WebUI Forge</li>
+                <li>นำรูปภาพที่ได้มาฝัง Metadata พารามิเตอร์ทั้งหมดลงในก้อน Chunks ของไฟล์ PNG ด้วย <code>PngInfo()</code></li>
+                <li>ส่งข้อมูลไฟล์ไบนารี PNG กลับไปให้ Backend พร้อมแนบ Header พิเศษ เช่น <code>X-LUMA-Execution-Ms</code> และ <code>X-LUMA-Seed</code></li>
+              </ol>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.get("/v1/progress")</code> (ตรวจสอบหลอดโหลดสด)</div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> Query param <code>include_preview=true/false</code></span> | 
+                <span><strong>Output:</strong> JSON <code>{progress: 0.75, eta_relative: 3.2, current_image: "data:image/png;base64,..."}</code></span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong> ดึงค่า % การเดินสเต็ปของการ์ดจอสด ๆ และรูปภาพพรีวิวความละเอียดต่ำ ส่งกลับไปให้หน้าเว็บขยับหลอดโหลดแบบเรียลไทม์</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.post("/v1/interrupt")</code> & <code>@app.post("/v1/skip")</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> คำสั่งจากปุ่ม Cancel บนหน้าเว็บ</span> | 
+                <span><strong>Output:</strong> ผลการสั่งหยุด <code>{"status": "interrupted"}</code></span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong> ส่ง HTTP POST ตรงไปยัง <code>/sdapi/v1/interrupt</code> ของ Forge ทันที ทำให้ GPU ตัดรอบการคำนวณ คืน VRAM ทันที และหยุดงานปัจจุบัน</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.post("/v1/upscale")</code> & <code>@app.post("/v1/interrogate")</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ไฟล์ภาพอัปโหลด + อัตราส่วนขยาย (1.5x-4x) หรือโมเดลแกะแท็ก (DeepDanbooru/CLIP)</span> | 
+                <span><strong>Output:</strong> ภาพความละเอียดสูงที่ขยายแล้ว / รายการแท็กวิเคราะห์ภาพ</span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong> ขยายขนาดภาพด้วย AI Upscaler (R-ESRGAN, SwinIR) หรือวิเคราะห์ภาพถ่ายเป็นแท็ก Danbooru เพื่อนำไปใช้เจนภาพต่อ พร้อมระบบตรวจกันไม่ให้ภาพเกิน 4096px</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@app.post("/process")</code> & <code>@app.post("/v1/process")</code> (ฟิลเตอร์ภาพตามมาตรฐาน API Workshop)</div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ไฟล์ภาพ + ชื่อ operation (<code>grayscale</code>, <code>edge</code>, <code>blur</code>, <code>invert</code>)</span> | 
+                <span><strong>Output:</strong> ภาพผลลัพธ์ PNG ที่ผ่านการแต่งสีและตัดขอบแล้ว</span>
+              </div>
+              <p><strong>กระบวนการภายใน:</strong> ตรวจสอบ MIME type (JPEG, PNG, WebP) และส่งภาพเข้า <code>process_filter_image()</code> ในไฟล์ <code>filters.py</code></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.2 dev_provider.py -->
+        <div class="deep-dive-card" id="ai-dev-provider">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / dev_provider.py</span>
+              <span class="file-badge-lines">289 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 dev_provider.py — ระบบสร้างภาพจำลองเชิงขั้นตอน (Procedural Engine)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ออกแบบมาเพื่อเป็น <em>"ตัวสำรองอัจฉริยะ"</em> ในช่วง Development หรือเวลาที่เครื่องไม่มีการ์ดจอ NVIDIA / Forge ไม่ได้เปิดอยู่ ช่วยให้เพื่อนในทีมสามารถทดสอบระบบ ยิง API ตรวจเช็กระบบคิว และแสดงผลหน้าเว็บได้เหมือนของจริง 100% โดยไม่เกิด Error
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>_palette(rng: random.Random) -> list[tuple[int, int, int]]</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ตัวสุ่ม <code>random.Random(seed)</code></span> | 
+                <span><strong>Output:</strong> ชุดแม่สี RGB 4 สี ที่เข้าคู่กันอย่างกลมกลืน</span>
+              </div>
+              <p>
+                <strong>อัลกอริทึมภายใน:</strong> สุ่มมุมสีฐาน (Hue: 0-359 องศา) จากวงล้อสี แล้วคำนวณหาสีข้างเคียงด้วยระบบโมเดลสี HLS (Hue, Lightness, Saturation) แล้วแปลงเป็น RGB เพื่อนำไปใช้เป็นโทนสีหลักของรูปภาพ
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>generate_development_image(...) -> Image.Image</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> Prompt, กว้าง, สูง, Seed, โมเดล, สไตล์ ฯลฯ</span> | 
+                <span><strong>Output:</strong> วัตถุรูปภาพ Pillow Image ที่วาดขึ้นมาด้วยคณิตศาสตร์ล้วน ๆ</span>
+              </div>
+              <p><strong>ขั้นตอนการวาดภาพจำลอง:</strong></p>
+              <ul>
+                <li><strong>ชั้นที่ 1 (พื้นหลัง):</strong> วาดการไล่เฉดสีแบบ Gradient ทีละเส้นตามแนวแกน Y จากสีที่ 1 ไปยังสีที่ 2</li>
+                <li><strong>ชั้นที่ 2 (ลูกเล่นฟองสบู่):</strong> วาดวงกลมโปร่งใส 28 วง ที่มีขนาดและตำแหน่งสุ่มตาม Seed</li>
+                <li><strong>ชั้นที่ 3 (รูปทรงเรขาคณิต):</strong> วาดรูปหลายเหลี่ยมโปร่งใส 10 ชิ้น เพื่อสร้างมิติของภาพ</li>
+                <li><strong>ชั้นที่ 4 (เบลอนุ่มนวล):</strong> กรองภาพด้วย <code>ImageFilter.GaussianBlur</code></li>
+                <li><strong>ชั้นที่ 5 (HUD Glassmorphism Overlay):</strong> วาดกล่องข้อความโปร่งแสงมุมล่าง พิมพ์ข้อความ Prompt พร้อมป้ายระบุ <code>LUMA DEV / SEED / MODEL / STYLE</code> ติดบนรูปอย่างสวยงาม</li>
+              </ul>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>edit_development_image(source, prompt, strength, ...)</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ภาพต้นฉบับ + คำสั่ง Prompt สำหรับปรับแต่งภาพ</span> | 
+                <span><strong>Output:</strong> ภาพที่ผ่านการดัดแปลงสีและผสมพื้นผิว</span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> ตรวจจับคีย์เวิร์ดใน Prompt เช่น ถ้าเจอคำว่า <code>"grayscale"</code> หรือ <code>"black and white"</code> จะแปลงภาพเป็นขาวดำ, ถ้าเจอ <code>"vintage"</code> หรือ <code>"sepia"</code> จะย้อมสีสไตล์ภาพเก่า, ถ้าเจอ <code>"blur"</code> จะเบลอภาพ จากนั้นผสม Texture น้อยส์เสมือนจริงตามค่า Strength
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>interrogate_development_image(source, model) -> str</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ภาพต้นฉบับ</span> | 
+                <span><strong>Output:</strong> ข้อความแท็ก Danbooru หรือคำอธิบายภาพสไตล์ CLIP</span>
+              </div>
+              <p>
+                <strong>อัลกอริทึมการวิเคราะห์:</strong> ย่อภาพลงเหลือขนาดเล็กจิ๋ว 16x16 พิกเซล คำนวณค่าเฉลี่ยความสว่าง (Luminance) และอัตราส่วนภาพ ถ้าภาพเป็นแนวตั้งจะใส่แท็ก <code>portrait, 1girl</code>, ถ้าเป็นแนวนอนจะใส่ <code>landscape, scenery</code>, ถ้าโทนสีฟ้าเด่นจะใส่ <code>blue_theme, sky</code> เป็นต้น
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>get_live_progress(config, queue_manager, include_preview) -> dict</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> คอนฟิก + Queue Manager</span> | 
+                <span><strong>Output:</strong> JSON ข้อมูลความคืบหน้า % และภาพพรีวิวจำลอง</span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> หากกำลังเชื่อมต่อกับ Forge จะดึงค่าจริงจาก <code>/sdapi/v1/progress</code> แต่หากใช้โหมดจำลอง ฟังก์ชันนี้จะคำนวณเวลาที่ผ่านไปเพื่อสร้าง % หลอดโหลดจำลอง และวาดภาพกล่องสี่เหลี่ยมเปลี่ยนสีแบบสด ๆ เพื่อส่งให้หน้าเว็บแสดงผล
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.3 exceptions.py -->
+        <div class="deep-dive-card" id="ai-exceptions">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / exceptions.py</span>
+              <span class="file-badge-lines">23 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 exceptions.py — คลาสมาตรฐานสำหรับจัดการข้อผิดพลาด</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เป็นไฟล์รวมคลาสข้อยกเว้น (Custom Exceptions) เพื่อให้ระบบส่งสัญญาณบอกข้อผิดพลาดได้อย่างแม่นยำ ไม่ทำให้เซิร์ฟเวอร์หยุดทำงานกะทันหัน
+          </p>
+
+          <table class="code-explain-table">
+            <thead>
+              <tr>
+                <th>ชื่อ Exception Class</th>
+                <th>สืบทอดมาจาก</th>
+                <th>ความหมายและการใช้งาน</th>
+                <th>สถานะ HTTP ที่ตอบกลับ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>ProviderError</code></td>
+                <td><code>RuntimeError</code></td>
+                <td>เกิดข้อผิดพลาดในการประมวลผลจาก Forge เช่น โมเดลเสีย หรือ VRAM ล้น</td>
+                <td>HTTP 502 Bad Gateway</td>
+              </tr>
+              <tr>
+                <td><code>ProviderUnavailable</code></td>
+                <td><code>ProviderError</code></td>
+                <td>ติดต่อ WebUI Forge ที่พอร์ต 7860 ไม่ได้ (Forge ยังไม่ได้เปิด หรือเน็ตหลุด)</td>
+                <td>HTTP 503 Service Unavailable</td>
+              </tr>
+              <tr>
+                <td><code>ApiError</code></td>
+                <td><code>RuntimeError</code></td>
+                <td>ข้อผิดพลาดมาตรฐานของ LUMA เก็บตัวแปร <code>code</code>, <code>message</code>, และ <code>status_code</code></td>
+                <td>ตามค่า <code>status_code</code> เช่น 400, 401, 413, 429, 504</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 1.4 forge_client.py -->
+        <div class="deep-dive-card" id="ai-forge-client">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / forge_client.py</span>
+              <span class="file-badge-lines">318 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 forge_client.py — ไคลเอนต์ควบคุม WebUI Forge (GPU Inference Bridge)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เป็นสะพานสื่อสารระหว่าง Python กับ Stable Diffusion WebUI Forge (เตาอบการ์ดจอ) ผ่าน REST API ทำหน้าที่จัดรูปแบบพารามิเตอร์ JSON, ส่งคำขอผ่าน HTTP, และถอดรหัสรูปภาพ Base64
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>_real_forge_request(config, method, endpoint, **kwargs) -> Response</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> เมธอด HTTP, Endpoint เช่น <code>/sdapi/v1/txt2img</code></span> | 
+                <span><strong>Output:</strong> วัตถุ Requests Response หรือโยน <code>ProviderUnavailable</code></span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> จัดการเรื่อง HTTP Basic Auth (ถ้ามี), ตั้งค่าเวลารอเชื่อมต่อ (Connect Timeout 5s, Read Timeout 300s) และดักจับความผิดปกติของระบบเน็ต แปลงข้อความตอบกลับของ Forge เป็น Exception ที่อ่านเข้าใจง่าย
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>forge_payload(...) -> dict</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> Prompt, Seed, Steps, Model, LoRA, Sampler, CFG ฯลฯ</span> | 
+                <span><strong>Output:</strong> ก้อน JSON Dictionary ตามโครงสร้างของ WebUI Forge</span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> รวมร่างคำสั่ง LoRA ให้อยู่ในรูป <code>&lt;lora:ชื่อไฟล์:น้ำหนัก&gt;</code>, จัดเตรียมพารามิเตอร์ <code>override_settings</code> เพื่อสั่งเปลี่ยนโมเดล Checkpoint หรือปรับ <code>CLIP_stop_at_last_layers</code> ตามที่ต้องการ
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>decode_forge_image(response, fallback_seed) -> tuple[Image, int]</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> HTTP Response จาก Forge</span> | 
+                <span><strong>Output:</strong> <code>(วัตถุ Pillow Image, Seed จริงที่ใช้)</code></span>
+              </div>
+              <p>
+                <strong>กระบวนการภายใน:</strong> Forge จะส่งภาพกลับมาเป็นตัวหนังสือยาวเหยียดแบบ <strong>Base64</strong> ฟังก์ชันนี้จะดึงสตริงก้อนแรกออกมา ตัดหัวข้อความทิ้ง แล้วถอดรหัสด้วย <code>base64.b64decode()</code> เป็นไบนารี จากนั้นเปิดด้วย <code>Image.open()</code> และแกะ JSON อ่านค่า Seed จริงที่รายงานกลับมา
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>generate_forge_image(...)</code> & <code>edit_forge_image(...)</code></div>
+              <p>
+                - <code>generate_forge_image</code>: ประกอบร่าง Payload แล้วยิงไปที่ <code>POST /sdapi/v1/txt2img</code> เพื่อสร้างภาพใหม่จากข้อความ<br>
+                - <code>edit_forge_image</code>: นำภาพต้นฉบับมาเข้ารหัสเป็น Base64 แล้วส่งไปที่ <code>POST /sdapi/v1/img2img</code> พร้อมกำหนดค่า <code>denoising_strength</code> เพื่อดัดแปลงภาพเดิม
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>upscale_forge_image(...)</code> & <code>interrogate_forge_image(...)</code></div>
+              <p>
+                - <code>upscale_forge_image</code>: ส่งภาพไปที่ <code>POST /sdapi/v1/extra-single-image</code> เพื่อขยายความละเอียดด้วยอัลกอริทึม R-ESRGAN 4x+ หรือ SwinIR<br>
+                - <code>interrogate_forge_image</code>: ส่งภาพไปที่ <code>POST /sdapi/v1/interrogate</code> เพื่อให้ระบบ DeepDanbooru ถอดแท็กออกมา
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.5 queue_manager.py -->
+        <div class="deep-dive-card" id="ai-queue-manager">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / queue_manager.py</span>
+              <span class="file-badge-lines">195 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 queue_manager.py — ผู้จัดการคิวและผู้พิทักษ์การ์ดจอ (GPU Concurrency Lock)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> การ์ดจอ GPU มีหน่วยความจำ VRAM จำกัด หากมีคนสั่งเจนภาพพร้อมกัน 2-3 คน การ์ดจอจะเกิดอาการ <strong>CUDA Out-Of-Memory Crash</strong> ทันที โมดูลนี้จึงทำหน้าที่เป็นผู้จัดคิวแบบ <strong>FIFO (First-In, First-Out)</strong> ยอมให้ทำงานได้ทีละ 1 งานเท่านั้น
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 โครงสร้างคลาส <code>GenerationQueueManager</code></div>
+              <p>
+                - <code>_semaphore = threading.Semaphore(1)</code>: ประตูล็อกระดับฮาร์ดแวร์ เปิดให้เข้าได้ครั้งละ 1 งาน<br>
+                - <code>_lock = threading.Lock()</code>: ป้องกันข้อมูลตัวนับคิวเพี้ยนเมื่อมีหลายเธรดอ่านเขียนพร้อมกัน<br>
+                - <code>_queued_jobs</code>: นับจำนวนงานที่กำลังยืนรอคิว<br>
+                - <code>_active_jobs</code>: นับงานที่กำลังรันอยู่บนการ์ดจอ (0 หรือ 1)
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 คอนเท็กซ์เมเนเจอร์ <code>acquire(timeout=180.0)</code></div>
+              <pre class="code-block"><code>with queue_manager.acquire(timeout=180.0) as job_stats:
+    # 🔒 ตรงนี้เธรดอื่นจะต้องยืนรออยู่หน้าประตู
+    image, seed = generate_forge_image(...)
+# 🔓 เมื่อจบการทำงาน ประตูจะเปิดให้คนรอคิวลำดับถัดไปทันทีโดยอัตโนมัติ</code></pre>
+              <p>
+                <strong>จุดเด่นด้านความปลอดภัย:</strong>
+                1. หากมีคนรอคิวเกินความจุสูงสุด (20 คิว) จะปฏิเสธทันทีด้วยรหัส HTTP 429 Too Many Requests<br>
+                2. หากยืนรอคิวนานเกินเวลารอ (180 วินาที) จะตัดจบด้วยรหัส HTTP 504 Gateway Timeout<br>
+                3. บันทึกสถิติเวลาที่ใช้รอคิว (Wait Duration) และเวลาที่ใช้คำนวณจริง (Execution Duration) นำไปแสดงผลบนหน้าจอ
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>status() -> dict</code></div>
+              <p>ส่งคืนข้อมูลสถิติสุขภาพของระบบ เช่น มีงานรอคิวกี่งาน, เวลาคำนวณเฉลี่ยกี่มิลลิวินาที, เวลาที่เปิดเครื่องมานานเท่าใดแล้ว</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.6 scanner.py -->
+        <div class="deep-dive-card" id="ai-scanner">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / scanner.py</span>
+              <span class="file-badge-lines">355 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 scanner.py — สแกนเนอร์ค้นหาโมเดล SDXL และการ์ดเสริม LoRA</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ตรวจค้นฮาร์ดดิสก์ในโฟลเดอร์ของ Stability Matrix และ Forge เพื่อดึงรายชื่อไฟล์โมเดล <code>.safetensors</code>, ภาพพรีวิวตัวอย่าง, คำสั่งฝึกแท็ก LoRA, และรวบรวมแคตตาล็อก Samplers/Schedulers
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>scan_installed_models(config) -> list[dict]</code></div>
+              <p>วิ่งค้นหาในโฟลเดอร์ <code>Data\Models\StableDiffusion</code> อ่านข้อมูลจากไฟล์ <code>.cm-info.json</code> ดึงชื่อโมเดล, ขนาดไฟล์ (MB), ผู้สร้าง, โมเดลฐาน (SDXL), และลิงก์ภาพพรีวิวส่งกลับไปให้หน้าเว็บแสดงผลในกล่องเลือกโมเดล</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>scan_installed_loras(config) -> list[dict]</code></div>
+              <p>วิ่งค้นหาในโฟลเดอร์ <code>Data\Models\Lora</code> อ่านรายการคำ Trigger Words ที่โมเดลนั้นถูกเทรนมา และสร้างแท็กพร้อมใช้งาน เช่น <code>&lt;lora:ชื่อ:1.0&gt;</code> ให้ผู้ใช้คลิกใส่ใน Prompt ได้ทันที</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>find_preview_file(name, directory) -> Path | None</code></div>
+              <p>ค้นหาไฟล์ภาพตัวอย่างที่มีนามสกุล <code>.preview.png</code>, <code>.preview.jpg</code>, หรือ <code>.png</code> ตรงกับชื่อโมเดล เพื่อนำมาแสดงเป็นการ์ดรูปภาพบนหน้าเว็บ</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 แคตตาล็อกมาตรฐาน (Default Constants)</div>
+              <p>
+                บรรจุรายการค่าคงที่ระดับมืออาชีพ เช่น <code>DEFAULT_SAMPLERS</code> (Euler a, DPM++ 2M Karras, UniPC ฯลฯ), <code>DEFAULT_SCHEDULERS</code> (Karras, SGM Uniform ฯลฯ), และ <code>ASPECT_RATIOS</code> (1:1, 2:3, 3:2, 3:4, 4:3)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.7 styles.py -->
+        <div class="deep-dive-card" id="ai-styles">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / styles.py</span>
+              <span class="file-badge-lines">205 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 styles.py — ระบบแต่ง Prompt อัตโนมัติด้วย 10 Style Presets</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ผู้ใช้ทั่วไปมักนึกคำ Prompt ภาษาอังกฤษระดับสูงไม่ออก โมดูลนี้จึงบรรจุแม่แบบสไตล์ภาพยอดนิยม 10 แบบ เช่น <em>Anime Masterpiece</em>, <em>Cyberpunk Neon</em>, <em>Cinematic Photography</em>, <em>Studio Ghibli</em> และทำหน้าที่สอดแทรกคำคุณศัพท์ลงใน Prompt ให้อัตโนมัติ
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>apply_style_preset(...) -> tuple</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> ชื่อสไตล์ที่เลือก + Prompt และ Negative Prompt ดั้งเดิม</span> | 
+                <span><strong>Output:</strong> Prompt และ Negative Prompt ฉบับปรับปรุง พร้อมค่า Sampler, Steps, CFG ที่เหมาะสม</span>
+              </div>
+              <p>
+                <strong>กลไกการแทรกคำอย่างฉลาด:</strong>
+                ฟังก์ชันจะตรวจสอบก่อนว่ามีคำใน Prefix/Suffix อยู่ใน Prompt แล้วหรือไม่ เพื่อไม่ให้เกิดคำซ้ำซ้อน และจะนำคำต้องห้ามของสไตล์นั้น ๆ ไปรวมเข้ากับ Negative Prompt อัตโนมัติ พร้อมปรับจำนวน Steps และ CFG Scale ให้เข้ากับสไตล์นั้นทันที
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.8 png_parser.py -->
+        <div class="deep-dive-card" id="ai-png-parser">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / png_parser.py</span>
+              <span class="file-badge-lines">79 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 png_parser.py — ตัวแกะข้อมูลพารามิเตอร์ลับจากรูปภาพ PNG Info</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เมื่อผู้ใช้นำรูปภาพที่เคยเจนแล้วมาลากวางบนหน้าเว็บ โมดูลนี้จะใช้ Regular Expression ถอดรหัสข้อความ Metadata ที่ฝังอยู่ใน Chunks ของไฟล์ภาพ เพื่อแยกค่า Prompt, Negative, Steps, Sampler, Seed, และ Model ออกมาเติมลงในฟอร์มอัตโนมัติ
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>parse_png_parameters(text: str) -> dict[str, Any]</code></div>
+              <p>
+                <strong>ขั้นตอนการแกะข้อความ:</strong><br>
+                1. ตัดแบ่งข้อความด้วยคำว่า <code>\nNegative prompt: </code> เพื่อแยก Prompt ด้านบนออกจาก Negative Prompt<br>
+                2. ค้นหาจุดเริ่มต้นของพารามิเตอร์ด้วย Regex <code>Steps:\s*</code><br>
+                3. วนลูปจับคู่คีย์-แวลู <code>([A-Za-z0-9_ ]+):\s*([^,]+)</code> เพื่อดึงค่า Steps, Sampler, CFG Scale, Seed, Size, และ Model ออกมาเป็น JSON Dictionary
+              </p>
+            </div>
+          </div>
+
+          <!-- ตัวอย่างผลการรันจริงกับรูปภาพตัวอย่าง -->
+          <div style="margin-top: 1.2rem; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 1.2rem;">
+            <h4 style="color: var(--accent-cyan); font-size: 0.95rem; margin-bottom: 0.6rem;">🧪 ตัวอย่างผลการแกะเมทาดาต้าจริงจากไฟล์ภาพในระบบ:</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; font-size: 0.82rem;">
+              <div>
+                <strong style="color: #fff;">🌸 1. ภาพเจนจริง <code>images/95.png</code> (1024x1024):</strong>
+                <pre class="code-block" style="margin-top: 0.4rem;"><code>{
+  "prompt": "masterpiece, &lt;lora:...&gt;, Shiraori, cowboy shot, sakura,",
+  "negative_prompt": "low quality,",
+  "steps": 15,
+  "sampler": "Euler",
+  "cfg_scale": 5.0,
+  "seed": 3924559915,
+  "model": "waiIllustriousSDXL_v170",
+  "loras": ["6890ff69-554a-4c4f-89cb-a8fc90325ea2.TA_trained"]
+}</code></pre>
+              </div>
+              <div>
+                <strong style="color: #fff;">🧪 2. ภาพชุดทดสอบ <code>images/test_sd_param.png</code>:</strong>
+                <pre class="code-block" style="margin-top: 0.4rem;"><code>{
+  "prompt": "illustration, incredibly absurdres, 1girl, solo, sunglasses...",
+  "negative_prompt": "(worst quality, low quality:1.4), monochrome...",
+  "steps": 35,
+  "sampler": "Euler a",
+  "cfg_scale": 7.0,
+  "seed": 123456789,
+  "model": "SDXL"
+}</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.9 filters.py -->
+        <div class="deep-dive-card" id="ai-filters">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / filters.py</span>
+              <span class="file-badge-lines">38 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 filters.py — อัลกอริทึมประมวลผลฟิลเตอร์ภาพ (API Workshop Standard)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ประมวลผลตกแต่งภาพตามโจทย์มาตรฐาน API Workshop โดยบรรจุ 4 อัลกอริทึมทางคณิตศาสตร์และ Image Processing:
+          </p>
+
+          <table class="code-explain-table">
+            <thead>
+              <tr>
+                <th>ชื่อฟิลเตอร์ (Operation)</th>
+                <th>อัลกอริทึมและสูตรคณิตศาสตร์ที่ใช้</th>
+                <th>คำอธิบายการทำงาน</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>grayscale</code></td>
+                <td><strong>Luminance Weighted Sum (ITU-R BT.601)</strong><br><code>Y = 0.299*R + 0.587*G + 0.114*B</code></td>
+                <td>คำนวณความสว่างของแสงตามการรับรู้ของสายตามนุษย์ (สีเขียวสว่างสุด 58.7%, แดง 29.9%, น้ำเงิน 11.4%) แล้วแปลงเป็นภาพขาวดำ</td>
+              </tr>
+              <tr>
+                <td><code>edge</code></td>
+                <td><strong>2D Spatial Gradient Convolution (Laplacian / FIND_EDGES)</strong></td>
+                <td>หาขอบเขตของวัตถุที่มีความต่างของระดับสีสูง จากนั้นทำการ Invert สีให้พื้นหลังเป็นสีขาวและเส้นขอบเป็นสีดำ เหมาะสำหรับทำ Lineart</td>
+              </tr>
+              <tr>
+                <td><code>blur</code></td>
+                <td><strong>2D Gaussian Spatial Kernel Convolution Filter</strong></td>
+                <td>การเบลอภาพแบบเกาส์เซียนด้วยรัศมีกระจาย 4 พิกเซล ตัดคลื่นความถี่สูงเพื่อลดสัญญาณรบกวน (Noise Reduction)</td>
+              </tr>
+              <tr>
+                <td><code>invert</code></td>
+                <td><strong>Arithmetic Channel Inversion</strong><br><code>New_Pixel = 255 - X</code></td>
+                <td>กลับค่าสีของพิกเซลในทุก Channel ให้กลายเป็นสีคู่ตรงข้าม (Negative Film Effect)</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 1.5rem;">
+            <h4 style="color: #fff; font-size: 1.05rem; margin-bottom: 0.8rem;">🖼️ ตัวอย่างผลลัพธ์ภาพจริงที่ประมวลผลผ่านโค้ดชุดนี้:</h4>
+            <div class="comparison-grid">
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">ORIGINAL</span>
+                  <img src="images/95.png" alt="Original Real AI Image" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>ภาพต้นฉบับจริง</strong>
+                  <p>เจนจาก SDXL + LoRA Shiraori (1024x1024)</p>
+                </div>
+              </div>
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">GRAYSCALE</span>
+                  <img src="images/luma-95aedfd0-grayscale.png" alt="Grayscale Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>Grayscale</strong>
+                  <p>ITU-R BT.601 Luminance</p>
+                </div>
+              </div>
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">EDGE</span>
+                  <img src="images/luma-95aedfd0-edge.png" alt="Edge Detection Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>Edge Detection</strong>
+                  <p>Laplacian FIND_EDGES Inverted</p>
+                </div>
+              </div>
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">BLUR</span>
+                  <img src="images/luma-95aedfd0-blur.png" alt="Gaussian Blur Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>Gaussian Blur</strong>
+                  <p>Radius 4 Spatial Convolution</p>
+                </div>
+              </div>
+              <div class="comparison-card">
+                <div class="comparison-img-wrap">
+                  <span class="comparison-badge">INVERT</span>
+                  <img src="images/luma-95aedfd0-invert.png" alt="Color Inversion Filter" loading="lazy">
+                </div>
+                <div class="comparison-desc">
+                  <strong>Color Inversion</strong>
+                  <p>255 - X Negative Channels</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.10 tag_service.py -->
+        <div class="deep-dive-card" id="ai-tag-service">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / tag_service.py</span>
+              <span class="file-badge-lines">66 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 tag_service.py — บริการแนะนำคำศัพท์ Danbooru Auto-Complete</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> คอยอ่านไฟล์พจนานุกรมแท็ก <code>danbooru_tags.json</code> ขึ้นหน่วยความจำแรม และให้บริการค้นหาคำแนะนำอัตโนมัติขณะที่ผู้ใช้กำลังพิมพ์ Prompt
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>search_tags(query: str, limit: int = 20) -> list[dict]</code></div>
+              <p>
+                <strong>อัลกอริทึมการค้นหา 2 ระดับ (Two-Tier Match):</strong><br>
+                1. <strong>Prefix Match:</strong> ค้นหาคำที่ขึ้นต้นด้วยตัวอักษรที่พิมพ์ก่อนเป็นอันดับแรก (แสดงผลเร็วที่สุด)<br>
+                2. <strong>Substring & Alias Match:</strong> หากผลลัพธ์ยังไม่ครบตามจำนวน limit จะค้นหาคำที่มีคำค้นหาปรากฏอยู่ส่วนใดส่วนหนึ่ง หรือตรงกับคำพ้องความหมาย (Aliases)<br>
+                ส่งคืนข้อมูลพร้อมระบุประเภทแท็ก (ตัวละคร, ลิขสิทธิ์, สไตล์) และจำนวนความนิยมของแท็กนั้น ๆ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1.11 validators.py -->
+        <div class="deep-dive-card" id="ai-validators">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">ai-engine / validators.py</span>
+              <span class="file-badge-lines">171 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 validators.py — ระบบตรวจสอบความถูกต้องของข้อมูล (Pydantic Models)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เป็นด่านตรวจความถูกต้องของข้อมูลก่อนจะส่งต่อไปประมวลผล ป้องกันไม่ให้พารามิเตอร์ผิดพลาดทำให้ระบบแครช
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 คลาสโมเดล <code>GenerateRequest(BaseModel)</code></div>
+              <p><strong>กฎเหล็กที่ตรวจสอบ:</strong></p>
+              <ul>
+                <li><code>prompt</code>: ต้องมีความยาวระหว่าง 3 ถึง 1,000 ตัวอักษร</li>
+                <li><code>width, height</code>: ต้องอยู่ระหว่าง 256 ถึง 1,024 พิกเซล และ <strong>ต้องหารด้วย 64 ลงตัวเสมอ</strong> (เนื่องจากสถาปัตยกรรม VAE ของ Stable Diffusion บีบอัดภาพด้วยอัตราส่วน 8x8)</li>
+                <li><code>steps</code>: ต้องเป็นจำนวนเต็มระหว่าง 1 ถึง 50 สเต็ป</li>
+                <li><code>cfg_scale</code>: ต้องเป็นตัวเลขทศนิยมระหว่าง 1.0 ถึง 30.0</li>
+                <li><code>clip_skip</code>: ต้องเป็นจำนวนเต็มระหว่าง 1 ถึง 12</li>
+              </ul>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>prompt_seed(prompt: str, supplied_seed=None) -> int</code></div>
+              <p>
+                หากผู้ใช้ไม่ได้ระบุค่า Seed ฟังก์ชันนี้จะนำข้อความ Prompt ไปเข้ารหัสแฮชด้วย <strong>SHA-256</strong> แล้วแปลง 4 ไบต์แรกให้เป็นเลขจำนวนเต็ม 32 บิต ทำให้ถ้าใช้ Prompt เดิมและไม่ใส่ Seed จะได้ภาพเดิมเสมอ
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           PART 2: BACKEND
+           ==================================================================== -->
+      <section class="doc-section">
+        <div class="section-badge">หมวดที่ 2 — เครื่องที่ 3 (PC 3: IP 172.20.56.162 พอร์ต 5000)</div>
+        <h2>Backend (Flask / Waitress Orchestrator & Database)</h2>
+        <p class="lead-text">
+          ทำหน้าที่เป็นศูนย์กลางของข้อมูล ดูแลบัญชีผู้ใช้ บันทึกคิวงานลงฐานข้อมูล SQLite และส่งงานข้ามเครือข่าย LAN ไปยัง AiEngine:
+        </p>
+
+        <!-- 2.0 run.py -->
+        <div class="deep-dive-card" id="be-run">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / run.py</span>
+              <span class="file-badge-lines">19 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 run.py — จุดสตาร์ทเซิร์ฟเวอร์โปรดักชัน Waitress WSGI</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ไฟล์รันหลักของเซิร์ฟเวอร์ Backend ทำหน้าที่เปิดบริการ WSGI Server ระดับ Production ด้วย <strong>Waitress</strong> ซึ่งถูกออกแบบมาให้ทำงานบน Windows ได้อย่างเสถียร รองรับการเชื่อมต่อพร้อมกันแบบหลายเธรด (Multi-Threaded)
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 การทำงานของโค้ดใน <code>run.py</code></div>
+              <pre class="code-block"><code>load_dotenv()
+app = create_app()
+
+if __name__ == "__main__":
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "5000"))
+    if os.getenv("FLASK_DEBUG", "0") == "1":
+        app.run(host=host, port=port, debug=True)
+    else:
+        # รันบนโปรดักชันด้วย Waitress 8 เธรด ป้องกันการค้างเมื่อมีคำขอหลายตัวพร้อมกัน
+        serve(app, host=host, port=port, threads=int(os.getenv("WEB_THREADS", "8")))</code></pre>
+              <p>
+                <strong>จุดเด่น:</strong> การใช้ <code>threads=8</code> ทำให้เซิร์ฟเวอร์สามารถรับคำขอดูสถานะ (Polling), ตอบคำขอดาวน์โหลดภาพ, และรับคำสั่งเจนภาพใหม่ได้พร้อมกันโดยไม่บล็อกกันเอง
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.1 __init__.py -->
+        <div class="deep-dive-card" id="be-init">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / __init__.py</span>
+              <span class="file-badge-lines">133 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 __init__.py — จุดประกอบร่างแอปพลิเคชัน Flask (Application Factory)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> สร้างและตั้งค่าแอปพลิเคชัน Flask, ติดตั้งระบบ CORS, ลงทะเบียน Blueprints ทั้งหมด, และทำการ <strong>Auto-Migrate โครงสร้างตารางฐานข้อมูลอัตโนมัติ</strong>
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>create_app(test_config=None) -> Flask</code></div>
+              <p><strong>ขั้นตอนการเริ่มต้นทำงาน:</strong></p>
+              <ul>
+                <li>สร้างโฟลเดอร์สำหรับเก็บภาพ <code>media/</code> และ <code>uploads/</code> หากยังไม่มี</li>
+                <li>ผูก <code>db.init_app(app)</code> และ <code>jwt.init_app(app)</code></li>
+                <li>ตั้งค่า CORS อนุญาตเฉพาะโดเมนที่ระบุในคอนฟิก</li>
+                <li>ลงทะเบียน 4 เส้นทางหลัก:
+                  <br>- <code>/api/v1/auth</code> ➔ จัดการล็อกอินและสมัครสมาชิก
+                  <br>- <code>/api/v1/jobs</code> ➔ สั่งงานและดูประวัติ
+                  <br>- <code>/api/v1</code> ➔ พร็อกซีส่งต่อไปยัง AI Engine
+                  <br>- <code>/media</code> ➔ ส่งไฟล์ภาพผลลัพธ์
+                </li>
+                <li><strong>ระบบปรับปรุงโครงสร้าง DB อัตโนมัติ:</strong> ตรวจสอบว่าตาราง <code>job</code> มีคอลัมน์ใหม่ เช่น <code>model, loras, sampler, scheduler, cfg_scale, clip_skip, style_preset</code> หรือไม่ ถ้ายังไม่มีจะสั่ง <code>ALTER TABLE job ADD COLUMN</code> ให้อัตโนมัติ ป้องกันปัญหาฐานข้อมูลพัง</li>
+                <li>สร้างเราต์ <code>@app.get("/api/v1/health")</code> ตรวจสุขภาพของฐานข้อมูล SQLite และบริการ AI Engine พร้อมกัน</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.2 config.py & extensions.py -->
+        <div class="deep-dive-card" id="be-config">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / config.py & extensions.py</span>
+              <span class="file-badge-lines">29 + 5 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 config.py & extensions.py — การตั้งค่าระบบและตัวแปรฐานข้อมูลกลาง</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 คลาส <code>Config</code> ใน <code>config.py</code></div>
+              <p>
+                โหลดค่าตัวแปรสภาพแวดล้อมที่จำเป็นทั้งหมด เช่น <code>SECRET_KEY</code> สำหรับสร้างกุญแจ HMAC, <code>JWT_SECRET_KEY</code> สำหรับออกตั๋วล็อกอิน, ที่อยู่ของ AI Engine <code>AI_SERVICE_URL</code> (http://25.23.21.202:8000), โทเคนความปลอดภัย <code>AI_SERVICE_TOKEN</code>, และอายุของลิงก์ดูภาพ <code>MEDIA_TOKEN_MAX_AGE</code> (3,600 วินาที)
+              </p>
+            </div>
+            <div class="function-item" id="be-extensions">
+              <div class="function-item-title">🔹 <code>extensions.py</code></div>
+              <p>
+                ประกาศตัวแปร <code>db = SQLAlchemy()</code> เพียงบรรทัดเดียว จุดประสงค์คือเพื่อแก้ปัญหา <strong>Circular Import (การนำเข้าไฟล์วนลูป)</strong> ทำให้ไฟล์ Models และไฟล์ Routes สามารถเรียกใช้ฐานข้อมูลร่วมกันได้โดยไม่ชนกัน
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.3 models.py -->
+        <div class="deep-dive-card" id="be-models">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / models.py</span>
+              <span class="file-badge-lines">96 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 models.py — โครงสร้างตารางฐานข้อมูล SQLite (Database Models)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> กำหนดโครงสร้างตารางข้อมูลในระบบ LUMA ด้วย SQLAlchemy ORM:
+          </p>
+
+          <table class="code-explain-table">
+            <thead>
+              <tr>
+                <th>ตาราง</th>
+                <th>คอลัมน์สำคัญ</th>
+                <th>ฟังก์ชันการทำงานภายใน</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>User</strong></td>
+                <td><code>id</code>, <code>username</code>, <code>password_hash</code>, <code>created_at</code></td>
+                <td>
+                  - <code>set_password(pwd)</code>: เข้ารหัสผ่านด้วย PBKDF2 (ปลอดภัยสูง ห้ามเก็บรหัสจริง)<br>
+                  - <code>check_password(pwd)</code>: ตรวจสอบความถูกต้องของรหัสผ่าน<br>
+                  - <code>to_dict()</code>: แปลงข้อมูลผู้ใช้เป็น JSON
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Job</strong></td>
+                <td>
+                  <code>id</code> (UUID), <code>user_id</code>, <code>type</code>, <code>status</code> (queued, processing, completed, failed, interrupted), <code>progress</code> (0-100), <code>prompt</code>, <code>seed</code>, <code>result_filename</code>, <code>model</code>, <code>loras</code>, <code>sampler</code>, <code>scheduler</code>, <code>cfg_scale</code>, <code>style_preset</code>
+                </td>
+                <td>
+                  - <code>to_dict(result_url)</code>: จัดรูปแบบข้อมูลงานส่งกลับให้หน้าเว็บ พร้อมแนบลิงก์รูปภาพที่มีรหัสความปลอดภัย HMAC
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 2.4 auth.py -->
+        <div class="deep-dive-card" id="be-auth">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / auth.py</span>
+              <span class="file-badge-lines">66 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 auth.py — ระบบสมัครสมาชิก ล็อกอิน และออกตั๋ว JWT Token</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@auth_blueprint.post("/register")</code></div>
+              <p>ตรวจชื่อผู้ใช้ด้วย Regex <code>^[a-z0-9_.-]{3,40}$</code> และรหัสผ่านความยาว 8-128 ตัวอักษร นำไปแฮชด้วย PBKDF2 บันทึกลงตาราง <code>user</code> แล้วออกตั๋ว JWT คืนกลับไปทันที</p>
+            </div>
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@auth_blueprint.post("/login")</code></div>
+              <p>ค้นหาชื่อผู้ใช้และตรวจสอบรหัสผ่านด้วย <code>user.check_password()</code> หากถูกต้องจะออกตั๋ว <code>access_token</code> อายุ 8 ชั่วโมงให้เบราว์เซอร์เก็บไว้ใน LocalStorage</p>
+            </div>
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@auth_blueprint.get("/me")</code></div>
+              <p>ดักจับด้วย <code>@jwt_required()</code> ดึงไอดีผู้ใช้จากตั๋ว Token เพื่อส่งข้อมูลโปรไฟล์ของผู้ใช้คนนั้นกลับไป</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.5 jobs.py -->
+        <div class="deep-dive-card" id="be-jobs">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / jobs.py</span>
+              <span class="file-badge-lines">231 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 jobs.py — ศูนย์รับออเดอร์งาน & ตรวจสอบลิงก์ภาพความปลอดภัย HMAC</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@jobs_blueprint.post("/generate")</code></div>
+              <div class="function-io-tag">
+                <span><strong>Input:</strong> JSON พารามิเตอร์สร้างภาพ + ตั๋ว JWT ผู้ใช้</span> | 
+                <span><strong>Output:</strong> รหัส HTTP 202 Accepted พร้อมข้อมูล Job</span>
+              </div>
+              <p>
+                <strong>กระบวนการทำงาน:</strong> รับคำสั่งสร้างภาพ ตรวจสอบขอบเขตตัวเลข บันทึกลงตาราง <code>job</code> ด้วยสถานะ <code>"queued"</code> แล้วส่งงานต่อไปยัง <code>queue_job()</code> ใน <code>worker.py</code> เพื่อให้ทำงานเบื้องหลังทันที
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>result_url(job: Job) -> str</code> (ระบบป้องกันการแอบดูภาพ)</div>
+              <p>
+                สร้างลิงก์รูปภาพที่มีความปลอดภัยสูงด้วย <code>URLSafeTimedSerializer</code>:
+              </p>
+              <pre class="code-block"><code># เข้ารหัสไอดีงาน, ไอดีเจ้าของภาพ, และชื่อไฟล์ เป็นโทเคนลับ
+token = serializer().dumps({"job": job.id, "user": job.user_id, "file": job.result_filename})
+return f"/media/{job.result_filename}?token={token}"</code></pre>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>@media_blueprint.get("/&lt;path:filename&gt;")</code></div>
+              <p>
+                เมื่อมีคำขอขอดูรูปภาพ ฟังก์ชันนี้จะถอดรหัสโทเคน HMAC หากพบว่าโทเคนหมดอายุเกิน 1 ชั่วโมง หรือผู้ที่ขอดูไม่ใช่เจ้าของรูปภาพจริง จะตัดสายทิ้งด้วย HTTP 401 Unauthorized ทันที หากถูกต้องจะส่งภาพด้วย <code>send_from_directory()</code>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.6 worker.py -->
+        <div class="deep-dive-card" id="be-worker">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / worker.py</span>
+              <span class="file-badge-lines">137 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 worker.py — ม้าเร็วทำงานเบื้องหลังและเชื่อมเครือข่ายส่งงาน AI</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>executor = ThreadPoolExecutor(max_workers=2)</code></div>
+              <p>พูลเธรดทำงานเบื้องหลัง ช่วยให้เซิร์ฟเวอร์หลักของ Flask ไม่ค้าง ตอบสนองผู้ใช้ได้ตลอดเวลาแม้กำลังรอการ์ดจอเจนรูป</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>process_job(app, job_id)</code> (หัวใจการดึงข้อมูลข้ามเครื่อง)</div>
+              <p>
+                <strong>ขั้นตอนการทำงานแบบเรียงลำดับ:</strong><br>
+                1. ดึงข้อมูลงานจากฐานข้อมูล เปลี่ยนสถานะเป็น <code>"processing"</code> และหลอดโหลดเป็น 15%<br>
+                2. จัดเตรียม Header ความปลอดภัย <code>X-LUMA-Service-Token</code><br>
+                3. ส่งคำขอข้ามเน็ต Hamachi ไปที่ <code>http://25.23.21.202:8000/v1/generate</code> บนเครื่องที่ 1<br>
+                4. รอรับไบนารีภาพผลลัพธ์ PNG<br>
+                5. เขียนข้อมูลลงฮาร์ดดิสก์ที่ <code>MEDIA_ROOT/&lt;job_id&gt;.png</code> บนเครื่องที่ 3<br>
+                6. อัปเดตสถานะในฐานข้อมูลเป็น <code>"completed"</code> และปรับหลอดโหลดเป็น 100%
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2.7 ai_proxy.py -->
+        <div class="deep-dive-card" id="be-ai-proxy">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">backend / luma_backend / ai_proxy.py</span>
+              <span class="file-badge-lines">275 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 ai_proxy.py — ท่อส่งต่อคำขอ (Reverse Proxy Bridge)</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เมื่อเบราว์เซอร์ของผู้ใช้ต้องการข้อมูลจาก AI Engine (เช่น ขอรายชื่อโมเดล, ขอภาพพรีวิว, ขอดูหลอดโหลดสด) เบราว์เซอร์จะไม่สามารถยิงตรงไปที่พอร์ต 8000 ได้เพราะติดเรื่องความปลอดภัย ไฟล์นี้จึงทำหน้าที่เป็น <strong>"ตัวแทนส่งต่อ"</strong> แนบโทเคนลับแล้วส่งคำขอไปถามแทน
+          </p>
+
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>forward_ai_request(...) -> Response</code></div>
+              <p>รับพารามิเตอร์ทุกรูปแบบ แนบโทเคน <code>X-LUMA-Service-Token</code> ยิงไปยังเครื่อง AI Engine หากสิ่งที่ได้กลับมาเป็นภาพจะทำการสตรีมไบนารีกลับไป หรือหากเป็น JSON จะส่งต่อให้หน้าเว็บทันที</p>
+            </div>
+            <div class="function-item">
+              <div class="function-item-title">🔹 เส้นทางส่งต่อทั้งหมด (16 Proxied Endpoints)</div>
+              <p>
+                ครอบคลุม <code>/models</code>, <code>/loras</code>, <code>/preview/model/&lt;name&gt;</code>, <code>/preview/lora/&lt;name&gt;</code>, <code>/samplers</code>, <code>/schedulers</code>, <code>/styles</code>, <code>/settings</code>, <code>/filters</code>, <code>/process</code>, <code>/upscalers</code>, <code>/queue/status</code>, <code>/progress</code>, <code>/interrupt</code>, <code>/skip</code>, <code>/upscale</code>, <code>/interrogate</code>, <code>/png-info</code>, และ <code>/tags</code>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           PART 3: FRONTEND
+           ==================================================================== -->
+      <section class="doc-section">
+        <div class="section-badge">หมวดที่ 3 — เครื่องที่ 2 (PC 2: IP 25.10.76.51 พอร์ต 8080)</div>
+        <h2>Frontend (Client Single Page Application & Assets)</h2>
+        <p class="lead-text">
+          ส่วนติดต่อผู้ใช้ที่ทุกคนใช้งานผ่านหน้าจอเบราว์เซอร์ ประกอบด้วยโค้ดควบคุม สไตล์ และพจนานุกรมคำแท็ก:
+        </p>
+
+        <!-- 3.1 app.js -->
+        <div class="deep-dive-card" id="fe-app">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">frontend / assets / app.js</span>
+              <span class="file-badge-lines">2,080 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 app.js — มันสมองฝั่งหน้าบ้าน ควบคุมทุกการคลิกและการแสดงผล</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 โครงสร้างตัวแปรสถานะส่วนกลาง <code>const state = { ... }</code></div>
+              <p>เก็บค่า Token ล็อกอิน, ข้อมูลผู้ใช้, แคตตาล็อกโมเดลและ LoRA ที่โหลดมา, ประวัติงาน, ตัวจับเวลา Polling, และภาพผลลัพธ์ปัจจุบัน</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>init()</code> & <code>setupEventListeners()</code></div>
+              <p>เริ่มต้นทำงานเมื่อโหลดหน้าเว็บ ดึง Token จาก LocalStorage ตรวจสอบผู้ใช้ โหลดรายชื่อโมเดล Sampler สไตล์ภาพ และผูก Event คลิก ปุ่มสลับแท็บ แถบเลื่อนปรับขนาดภาพ</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>handleTagInput(e)</code> (ระบบแนะนำคำ Danbooru Auto-Complete)</div>
+              <p>ดักจับตัวอักษรที่ผู้ใช้พิมพ์ในช่อง Prompt ถ้าตรงกับคำในพจนานุกรม จะเรนเดอร์กล่องเมนูลอยขึ้นมาให้กดปุ่มลูกศรขึ้น-ลง หรือกด Tab เพื่อเลือกคำได้อย่างสะดวกสบาย</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 ระบบวนลูปตรวจสอบสถานะคู่ (Dual Polling Engine)</div>
+              <p>
+                - <code>pollJob(jobId)</code>: ถาม Backend ที่ <code>/api/v1/jobs/{id}</code> ทุก 1.5 วินาที เมื่อสถานะเป็น <code>completed</code> จะสั่งเรนเดอร์ภาพผลลัพธ์ทันที<br>
+                - <code>pollProgress()</code>: ถามความคืบหน้าสดที่ <code>/api/v1/progress?include_preview=true</code> ทุก 0.5 วินาที มาขยับหลอดโหลดและแสดงรูปพรีวิวแบบเรียลไทม์
+              </p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>downloadActiveImage(e)</code> (ดาวน์โหลดภาพทะลุกฎเบราว์เซอร์)</div>
+              <pre class="code-block"><code>// ดึงภาพจาก URL มาแปลงเป็น Blob ในหน่วยความจำ เพื่อแก้ปัญหา Chrome Cross-Origin Block
+const res = await fetch(currentSrc);
+const rawBlob = await res.blob();
+const pngBlob = new Blob([rawBlob], { type: "image/png" });
+const blobUrl = URL.createObjectURL(pngBlob);
+
+const a = document.createElement("a");
+a.href = blobUrl;
+a.download = `luma-${jobId}.png`;
+a.click(); // สั่งเบราว์เซอร์บันทึกไฟล์ลงโฟลเดอร์ Downloads โดยตรง</code></pre>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>applyFilter()</code> & <code>applyUpscale()</code> & <code>inspectPngInfo()</code></div>
+              <p>
+                - <code>applyFilter(operation)</code>: ส่งภาพปัจจุบันไปแปลงเป็นขาวดำ ตัดขอบ เบลอ หรือกลับสี<br>
+                - <code>applyUpscale(factor)</code>: ขยายขนาดภาพ 2x-4x ด้วย AI Super-Resolution<br>
+                - <code>inspectPngInfo(file)</code>: รองรับการลากไฟล์รูปภาพมาวาง (Drag & Drop) เพื่อแกะพารามิเตอร์ Prompt คืนลงฟอร์ม
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3.2 danbooru_tags.json -->
+        <div class="deep-dive-card" id="fe-danbooru">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">frontend / assets / danbooru_tags.json</span>
+              <span class="file-badge-lines">พจนานุกรมแท็ก</span>
+              <h3 class="deep-dive-file-title">📄 danbooru_tags.json — คลังคำศัพท์แท็ก Danbooru กว่า 10,000 คำ</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> ฐานข้อมูลคำศัพท์แบบ Compact JSON โครงสร้างแบบ 4 ช่อง (Tuple Array) สำหรับระบบแนะนำคำค้นหาอัตโนมัติ:
+          </p>
+          <pre class="code-block"><code>[
+  ["1girl", 0, 5200000, "solo, female"],
+  ["blue_eyes", 0, 1800000, ""],
+  ["hatsune_miku", 4, 320000, "miku, vocaloid"],
+  ["monochrome", 5, 450000, "black_and_white"]
+]</code></pre>
+          <p>
+            <strong>โครงสร้างข้อมูล:</strong><br>
+            ช่องที่ 1: ชื่อแท็ก (Tag Name)<br>
+            ช่องที่ 2: รหัสหมวดหมู่ (0=General, 1=Artist, 3=Copyright, 4=Character, 5=Meta)<br>
+            ช่องที่ 3: จำนวนครั้งที่ถูกใช้งานบน Danbooru (สำหรับจัดอันดับความนิยม)<br>
+            ช่องที่ 4: คำพ้องความหมาย (Aliases)
+          </p>
+        </div>
+
+        <!-- 3.3 index.html & styles.css -->
+        <div class="deep-dive-card" id="fe-index">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">frontend / index.html & assets / styles.css</span>
+              <h3 class="deep-dive-file-title">📄 index.html & styles.css — โครงสร้างและงานดีไซน์ Glassmorphism</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>index.html</code> (โครงสร้างหน้าเว็บ)</div>
+              <p>
+                แบ่งหน้าจอออกเป็น 3 คอลัมน์หลัก: แถบซ้ายเป็นพาเนลปรับแต่งพารามิเตอร์ (โมเดล, LoRA, สเต็ป, สไตล์, ขนาดภาพ), ตรงกลางเป็นผืนผ้าใบแสดงภาพสด หลอดโหลด และแถบเครื่องมือ (Upscale, Filters, Download), แถบขวาเป็นประวัติการสร้างภาพและหน้าต่างแสดงรายละเอียด PNG Info
+              </p>
+            </div>
+            <div class="function-item" id="fe-styles">
+              <div class="function-item-title">🔹 <code>assets/styles.css</code> (ระบบดีไซน์)</div>
+              <p>
+                สร้างด้วย Vanilla CSS เต็มรูปแบบ ใช้โทนสีมืดระดับ Cyberpunk ตัดด้วยแสงสะท้อนเรืองแสง (Neon Ambient Glow), เอฟเฟกต์กระจกโปร่งแสง (Glassmorphism <code>backdrop-filter: blur(12px)</code>) และฟอนต์ภาษาไทย <em>Prompt</em> ร่วมกับฟอนต์สากล <em>Plus Jakarta Sans</em>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           PART 4: NGINX
+           ==================================================================== -->
+      <section class="doc-section">
+        <div class="section-badge">หมวดที่ 4 — ประตูหน้าด่าน Nginx (PC 2: IP 25.10.76.51 พอร์ต 8080)</div>
+        <h2>Nginx (Reverse Proxy & Edge Gateway)</h2>
+        <p class="lead-text">
+          รปภ. คอยคัดแยกประเภทงานหน้าประตูบ้าน แจกจ่ายเส้นทางไฟล์และ API:
+        </p>
+
+        <!-- 4.1 luma.conf -->
+        <div class="deep-dive-card" id="nx-luma">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">nginx / luma.conf</span>
+              <span class="file-badge-lines">66 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 luma.conf — กฎการส่งต่องาน (Routing Configuration)</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>upstream luma_backend { server 172.20.56.162:5000; }</code></div>
+              <p>ชี้เป้าหมายว่า เซิร์ฟเวอร์ Backend ที่รับผิดชอบคำนวณข้อมูลตั้งอยู่ที่เครื่องใดในวงเน็ต LAN (172.20.56.162)</p>
+            </div>
+
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>location ^~ /api/</code> & <code>location ^~ /media/</code> (จุดแก้บั๊ก 404 ในตำนาน)</div>
+              <pre class="code-block"><code># เครื่องหมาย ^~ เป็นตัวบังคับว่า ถ้าขึ้นต้นด้วย /api/ หรือ /media/ ให้ส่งต่อทันที ห้ามตกไปในเงื่อนไข Static File Regex
+location ^~ /api/ {
+    proxy_pass http://luma_backend;
+    proxy_read_timeout 190s;
+}
+
+location ^~ /media/ {
+    proxy_pass http://luma_backend;
+}</code></pre>
+              <p>
+                <strong>ทำไมต้องมี <code>^~</code>:</strong> เดิมทีหากไม่มีสัญลักษณ์นี้ Nginx จะคิดว่าไฟล์ภาพ <code>.png</code> เป็นไฟล์ในเครื่องตัวเอง ทำให้ส่งรหัส 404 Not Found กลับไป การใส่ <code>^~</code> จะบังคับให้ Nginx ส่งคำขอข้ามเครื่องไปหา Backend ที่เครื่องที่ 3 เสมอ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4.2 nginx.conf & docker.conf -->
+        <div class="deep-dive-card" id="nx-nginx">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">nginx / nginx.conf & docker.conf</span>
+              <h3 class="deep-dive-file-title">📄 nginx.conf & docker.conf — คอนฟิกระบบหลักและโหมด Docker</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>worker_processes 1;</code> ใน <code>nginx.conf</code></div>
+              <p>
+                บนระบบปฏิบัติการ Windows ตัว Nginx ไม่รองรับ Multi-Worker Master Process จึงต้องตั้งค่า <code>worker_processes 1;</code> เพื่อป้องกันปัญหาโปรเซสค้างหรือบล็อกพอร์ตการทำงาน
+              </p>
+            </div>
+            <div class="function-item" id="nx-docker">
+              <div class="function-item-title">🔹 <code>docker.conf</code></div>
+              <p>
+                เตรียมพร้อมไว้สำหรับการย้ายไประบบ Docker Container ในอนาคต โดยกำหนดค่า DNS Resolver ภายใน Docker Network และแมปโฟลเดอร์สำหรับทำ Volume Mount
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           PART 5: AUTOMATION SCRIPTS
+           ==================================================================== -->
+      <section class="doc-section">
+        <div class="section-badge">หมวดที่ 5 — สคริปต์สั่งงานอัตโนมัติ (.bat Files)</div>
+        <h2>สคริปต์อำนวยความสะดวกในการควบคุมและรันระบบ (Batch Scripts)</h2>
+        <p class="lead-text">
+          ไฟล์สคริปต์ Batch Command ที่สร้างขึ้นเพื่อให้ผู้ดูแลระบบสามารถเปิด-ปิด ตรวจเช็ก และเปิดคู่มือได้ในคลิกเดียว:
+        </p>
+
+        <!-- 5.1 run_aiengine.bat -->
+        <div class="deep-dive-card" id="sc-aiengine">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">run_aiengine.bat</span>
+              <span class="file-badge-lines">17 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 run_aiengine.bat — สคริปต์เปิดบริการ AiEngine พอร์ต 8000</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> สั่งรัน FastAPI บนหน้าต่าง Console สด ตรวจสอบว่ามี Virtual Environment <code>.venv</code> อยู่หรือไม่ หากมีจะเรียก <code>.venv\Scripts\python.exe app.py</code> เพื่อแสดงบันทึก Log คำขอสร้างภาพแบบ Real-Time
+          </p>
+        </div>
+
+        <!-- 5.2 run_nginx.bat & stop_nginx.bat -->
+        <div class="deep-dive-card" id="sc-nginx">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">run_nginx.bat & stop_nginx.bat</span>
+              <span class="file-badge-lines">32 + 8 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 run_nginx.bat & stop_nginx.bat — ควบคุมการเปิด-ปิดเว็บเซิร์ฟเวอร์ Nginx</h3>
+            </div>
+          </div>
+          <div class="function-list-grid">
+            <div class="function-item">
+              <div class="function-item-title">🔹 <code>run_nginx.bat</code></div>
+              <p>
+                ลบไฟล์ล็อก <code>logs\nginx.pid</code> เก่าที่ค้างอยู่ทิ้งก่อนเสมอ เพื่อป้องกันปัญหา Errno 10048 สั่งสตาร์ท <code>nginx.exe</code> แล้วรอ 2 วินาทีเพื่อเช็กด้วย <code>tasklist | findstr nginx.exe</code> ว่ารันสำเร็จจริงหรือไม่
+              </p>
+            </div>
+            <div class="function-item" id="sc-stop">
+              <div class="function-item-title">🔹 <code>stop_nginx.bat</code></div>
+              <p>
+                ส่งสัญญาณ <code>nginx.exe -s stop</code> และใช้คำสั่ง <code>taskkill /f /im nginx.exe</code> เพื่อปิดโปรเซส Nginx ทุกตัวในเครื่องอย่างสะอาดหมดจด ไม่ให้มีตัวค้างกินแรม
+              </p>
+            </div>
+            <div class="function-item" id="sc-check">
+              <div class="function-item-title">🔹 <code>check_nginx_log.bat</code></div>
+              <p>
+                เรียกคำสั่ง PowerShell <code>Get-Content logs\access.log -Wait -Tail 20</code> เพื่อดูความถี่และเส้นทางคำขอที่มีคนกดเข้ามาในระบบแบบสด ๆ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5.3 open_system_overview.bat -->
+        <div class="deep-dive-card" id="sc-overview">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">open_system_overview.bat</span>
+              <span class="file-badge-lines">38 บรรทัด</span>
+              <h3 class="deep-dive-file-title">📄 open_system_overview.bat — ตัวเปิดคู่มือและสารานุกรมแบบเลือกหน้า</h3>
+            </div>
+          </div>
+          <p>
+            <strong>หน้าที่หลัก:</strong> เมนูแบบโต้ตอบ (Interactive CLI) ในหน้าต่างสีดำ เมื่อเปิดขึ้นมาจะมีเมนูให้เลือก:
+            <br>[1] เปิดหน้าภาพรวมสถาปัตยกรรม & Flowchart (`index.html`)
+            <br>[2] เปิดหน้าสารานุกรมเจาะลึกโค้ดทุกไฟล์ (`code-deep-dive.html`)
+            <br>[3] เปิดทั้ง 2 หน้าพร้อมกันในเบราว์เซอร์
+          </p>
+        </div>
+      </section>
+
+      <!-- หมวดที่ 6: ผลการทดสอบรันระบบ Local จริง (Live Test Verification & Screenshots Gallery) -->
+      <section id="live-local-run" class="doc-section">
+        <div class="section-badge">หมวดที่ 6 — ผลการทดสอบรันเครื่องเดียว (Local Single-PC Live Verification)</div>
+        <h2>หลักฐานการรันระบบ Local เครื่องเดียว และแกลเลอรีภาพสดจากการทดสอบ</h2>
+        <p class="lead-text">
+          เพื่อรองรับการพัฒนา ทดสอบแบบ Standalone หรือกรณีที่ไม่ได้เชื่อมต่อสายแลน/Hamachi กับเพื่อนอีก 2 เครื่อง ระบบได้ถูกปรับแต่งคอนฟิกชั่วคราวให้สามารถรันครบทุกบริการ (Frontend + Backend + AiEngine + Nginx) ภายในเครื่องเดียวได้อย่างสมบูรณ์แบบ 100%
+        </p>
+
+        <!-- สรุปการตั้งค่าสำหรับรัน Local ชั่วคราว -->
+        <div class="deep-dive-card">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">Temporary Local Configurations</span>
+              <span class="file-badge-lines">4 จุดสำคัญ</span>
+              <h3 class="deep-dive-file-title">⚙️ สรุปจุดที่ปรับแต่งเพื่อรัน Local ชั่วคราว (พร้อมจุดสำหรับเปลี่ยนกลับ)</h3>
+            </div>
+          </div>
+          <table class="code-explain-table">
+            <thead>
+              <tr>
+                <th>ไฟล์ที่ปรับปรุง</th>
+                <th>ค่าที่ปรับชั่วคราว (Local Mode)</th>
+                <th>ค่าเดิมในโหมด 3 เครื่อง (3-PC Mode สำหรับเปลี่ยนกลับ)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>nginx/luma.conf</code> &amp; <code>C:\nginx\conf\luma.conf</code></td>
+                <td><code>upstream luma_backend { server 127.0.0.1:5000; }</code></td>
+                <td><code>upstream luma_backend { server 172.20.56.162:5000; }</code> (ชี้ไปยังเครื่อง PC 3 บนวงแลน)</td>
+              </tr>
+              <tr>
+                <td><code>frontend/assets/app.js</code></td>
+                <td><code>const BACKEND_HOST = "127.0.0.1:5000";</code></td>
+                <td><code>const BACKEND_HOST = "172.20.56.162:5000";</code></td>
+              </tr>
+              <tr>
+                <td><code>backend/.env</code></td>
+                <td><code>CORS_ORIGINS=http://localhost:8080,http://localhost,http://127.0.0.1,http://127.0.0.1:8080</code></td>
+                <td><code>CORS_ORIGINS=http://localhost:8080</code></td>
+              </tr>
+              <tr>
+                <td><code>ai-engine/.env</code></td>
+                <td><code>AI_PROVIDER=development-procedural</code></td>
+                <td><code>AI_PROVIDER=forge</code> (หรือสลับใช้ Forge บนเครื่องนี้หากเปิด WebUI Forge)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- แกลเลอรีผลการทดสอบสดจากการใช้งานจริงบนเบราว์เซอร์ -->
+        <div class="deep-dive-card">
+          <div class="deep-dive-header">
+            <div>
+              <span class="file-badge-module">Live Browser Test Artifacts</span>
+              <span class="file-badge-lines">บันทึกสดผ่าน Browser Subagent</span>
+              <h3 class="deep-dive-file-title">📸 ภาพบันทึกหน้าจอสดจากการทำงานจริงบนเบราว์เซอร์ (Live Captured Screenshots)</h3>
+            </div>
+          </div>
+          <p>
+            ภาพด้านล่างเป็นภาพถ่ายหน้าจอสดจริงจากการทดสอบรัน Nginx (พอร์ต 80), Backend (พอร์ต 5000), และ AiEngine (พอร์ต 8000) บนเครื่องนี้:
+          </p>
+
+          <div class="comparison-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.2rem; margin-top: 1rem;">
+            <!-- รูป UI 1: หน้าจอหลัก Studio -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">STUDIO WORKSPACE</span>
+                <img src="images/ui_studio_initial.png" alt="Studio Interface" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>1. หน้าจอหลัก LUMA Studio (Local :8080)</strong>
+                <p>อินเทอร์เฟซหลักพร้อมแถบคำสั่ง Prompt, โมเดล Checkpoint, ตัวเลือก Sampler และขนาดภาพ</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 2: สร้างภาพสำเร็จ -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">GENERATION OK</span>
+                <img src="images/ui_generated_result.png" alt="Live Generated Result" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>2. ภาพถูกสร้างและแสดงผลทันที</strong>
+                <p>สร้างภาพขนาด 512x512 พร้อมส่งมอบ JWT Media Token ให้ดึงรูปได้อย่างปลอดภัย</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 3: แถบฟิลเตอร์ตัดเส้นขอบ -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">EDGE FILTER</span>
+                <img src="images/ui_edge_filter_applied.png" alt="Edge Filter Applied" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>3. ผลลัพธ์ฟิลเตอร์ตัดเส้นขอบ (Edge Detection)</strong>
+                <p>สลับฟิลเตอร์แปลงภาพเป็นลายเส้นขาวดำสำหรับการนำไปดราฟต์ต่อได้ทันใจ</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 4: คลัง My Creations -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">MY CREATIONS</span>
+                <img src="images/ui_my_creations.png" alt="Live Creations Gallery" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>4. ประวัติภาพที่เคยสร้าง (Gallery)</strong>
+                <p>ภาพที่สร้างเสร็จจะถูกเก็บประวัติไว้ในแท็บ My Creations ให้ย้อนกลับมาดูได้ตลอดเวลา</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 5: ถอดรหัสลับ PNG Info -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">PNG INFO TOOL</span>
+                <img src="images/ui_png_info.png" alt="Live PNG Info Tool" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>5. เครื่องมือถอดรหัส PNG Info</strong>
+                <p>ถอดค่า Prompt, Negative, Seed, และ Sampler ที่ฝังอยู่ในรูปภาพออกมาแสดงผลแบบครบถ้วน</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 6: AI Upscale 2x -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">2X UPSCALE</span>
+                <img src="images/sample_upscale_2x.png" alt="Live Upscale Sample" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>6. ผลลัพธ์ AI Upscale 2 เท่า (1024x1024)</strong>
+                <p>ขยายความละเอียดด้วย Lanczos พร้อมปรับปรุงความคมชัดระดับไมโครคอนทราสต์</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 7: ผลลัพธ์ภาพเจนจริง Shiraori (95.png) -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">REAL SDXL GENERATION</span>
+                <img src="images/95.png" alt="Live Production Generation 95.png" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>7. ผลงานจริงโมเดล Illustrious SDXL + LoRA (95.png)</strong>
+                <p>สร้างภาพขนาด 1024x1024 ด้วย WebUI Forge และโมเดล <code>waiIllustriousSDXL_v170</code> พร้อมฝัง Metadata สมบูรณ์แบบ</p>
+              </div>
+            </div>
+
+            <!-- รูป UI 8: ภาพชุดทดสอบพารามิเตอร์ (test_sd_param.png) -->
+            <div class="comparison-card">
+              <div class="comparison-img-wrap">
+                <span class="comparison-badge">TEST ASSET</span>
+                <img src="images/test_sd_param.png" alt="SD Parameter Test Sample" loading="lazy">
+              </div>
+              <div class="comparison-desc">
+                <strong>8. ไฟล์ทดสอบพารามิเตอร์ PNG Info (test_sd_param.png)</strong>
+                <p>ไฟล์ภาพมาตรฐานฝัง Prompt และ Sampling Info สำหรับทดสอบและ Verify การทำงานของ <code>png_parser.py</code></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="doc-footer">
+        <div class="footer-inner">
+          <p><strong>Project LUMA</strong> — สารานุกรมเจาะลึกโครงสร้างโค้ดทุกไฟล์ ทุกบรรทัด ฉบับสมบูรณ์</p>
+          <p class="copyright">สร้างขึ้นเพื่อความเข้าใจอย่างลึกซึ้งและการพัฒนาอย่างยั่งยืนของทีมงานทุกคน.</p>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
