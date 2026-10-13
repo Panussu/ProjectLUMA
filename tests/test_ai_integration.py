@@ -199,4 +199,3 @@ def test_catalog_routes_match_engine(backend_client, registered_user, monkeypatc
     direct_response = backend_client.get(f"/api/v1/{backend_path}", headers=auth(registered_user["token"]))
     assert direct_response.status_code == 200
     assert calls == [f"http://ai.test/v1/{engine_path}"]
-
