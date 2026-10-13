@@ -31,6 +31,7 @@ jobs:
           node-version: "22"
       # ตรวจไวยากรณ์ JavaScript โดยไม่เปิดเบราว์เซอร์
       - run: node --check frontend/assets/app.js
+      - run: node --test tests/test_frontend.cjs
 
   # ตรวจความถูกต้องของค่ากำหนด Compose โดยยังไม่เริ่มบริการ
 

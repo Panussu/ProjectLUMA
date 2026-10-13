@@ -1,0 +1,9 @@
+/* ========================
+   เส้นขอบ สี และระยะของข้อความท้ายหน้า
+   ======================== */
+footer {
+  border-top: 1px solid var(--line);
+  color: #6f6f7d;
+  font-size: .8rem;
+  padding: 2rem 0;
+}
