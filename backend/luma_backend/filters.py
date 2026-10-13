@@ -34,23 +34,34 @@ def open_image(stream) -> Image.Image:
 
 
 def apply_filter(image: Image.Image, operation: str) -> Image.Image:
+    rgb = image.convert("RGB")
     if operation == "grayscale":
-        return ImageOps.grayscale(image).convert("RGB")
+        return ImageOps.grayscale(rgb).convert("RGB")
     if operation == "edge":
-        return ImageOps.grayscale(image).filter(ImageFilter.FIND_EDGES).convert("RGB")
+        gray = ImageOps.grayscale(rgb)
+        edges = gray.filter(ImageFilter.FIND_EDGES)
+        return ImageOps.invert(edges).convert("RGB")
     if operation == "blur":
-        return image.filter(ImageFilter.GaussianBlur(radius=2))
+        return rgb.filter(ImageFilter.GaussianBlur(radius=4))
     if operation == "invert":
-        return ImageOps.invert(image.convert("RGB"))
+        return ImageOps.invert(rgb)
     raise ValueError("Unsupported filter operation.")
 
 
-def upscale(image: Image.Image, scale_factor: float) -> Image.Image:
+def upscale(image: Image.Image, scale_factor: float, upscaler: str = "Lanczos") -> tuple[Image.Image, str]:
     if scale_factor not in {2.0, 3.0, 4.0}:
         raise ValueError("scale_factor must be 2.0, 3.0, or 4.0.")
     width = int(image.width * scale_factor)
     height = int(image.height * scale_factor)
-    return image.resize((width, height), Image.Resampling.LANCZOS)
+    resample_map = {
+        "Lanczos": Image.Resampling.LANCZOS,
+        "Nearest": Image.Resampling.NEAREST,
+        "Bicubic": Image.Resampling.BICUBIC,
+        "Bilinear": Image.Resampling.BILINEAR,
+    }
+    mode = resample_map.get(upscaler, Image.Resampling.LANCZOS)
+    used = upscaler if upscaler in resample_map else "Lanczos"
+    return image.resize((width, height), mode), used
 
 
 def procedural_interrogate(image: Image.Image, model: str) -> dict:

@@ -39,7 +39,10 @@ def process_job(app: Flask, job_id: str) -> None:
         db.session.commit()
 
         try:
-            headers = {"X-LUMA-Service-Token": app.config["AI_SERVICE_TOKEN"]}
+            headers = {
+                "X-LUMA-Service-Token": app.config["AI_SERVICE_TOKEN"],
+                "X-LUMA-Job-ID": str(job.id),
+            }
             timeout = (app.config["AI_CONNECT_TIMEOUT"], app.config["AI_READ_TIMEOUT"])
             base_url = app.config["AI_SERVICE_URL"].rstrip("/")
 
@@ -123,22 +126,39 @@ def process_job(app: Flask, job_id: str) -> None:
             except Exception as exc:
                 raise JobFailure("AI service returned a corrupt image.") from exc
 
+            # Check DB state before saving result
+            db.session.expire_all()
+            current_job = db.session.get(Job, job_id)
+            if not current_job or current_job.status in {"interrupted", "cancelled"}:
+                db.session.rollback()
+                return
+
             result_filename = f"{job.id}.png"
             result_path = Path(app.config["MEDIA_ROOT"]) / result_filename
             result_path.write_bytes(response.content)
-            job.result_filename = result_filename
-            job.provider = response.headers.get("X-LUMA-Provider", "unknown")[:80]
-            returned_seed = response.headers.get("X-LUMA-Seed")
-            if returned_seed:
-                job.seed = int(returned_seed)
-            persist_ai_result(job, response.headers)
-            if job.status in {"interrupted", "cancelled"}:
+
+            # Re-check again before commit
+            db.session.expire_all()
+            current_job = db.session.get(Job, job_id)
+            if not current_job or current_job.status in {"interrupted", "cancelled"}:
+                if result_path.exists():
+                    try:
+                        result_path.unlink()
+                    except OSError:
+                        pass
                 db.session.rollback()
                 return
-            job.status = "completed"
-            job.progress = 100
-            job.completed_at = datetime.now(timezone.utc)
-            job.error = None
+
+            current_job.result_filename = result_filename
+            current_job.provider = response.headers.get("X-LUMA-Provider", "unknown")[:80]
+            returned_seed = response.headers.get("X-LUMA-Seed")
+            if returned_seed:
+                current_job.seed = int(returned_seed)
+            persist_ai_result(current_job, response.headers)
+            current_job.status = "completed"
+            current_job.progress = 100
+            current_job.completed_at = datetime.now(timezone.utc)
+            current_job.error = None
             db.session.commit()
         except requests.Timeout as exc:
             exc = JobFailure("The AI service timed out before completing the job.")

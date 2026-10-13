@@ -51,7 +51,7 @@ def parse_prompt(value) -> str:
     return prompt
 
 
-def parse_ai_options(data: dict) -> dict:
+def parse_ai_options(data: dict, is_form: bool = False) -> dict:
     options: dict = {}
     for key in ("model", "sampler", "scheduler", "style_preset"):
         value = data.get(key)
@@ -69,31 +69,44 @@ def parse_ai_options(data: dict) -> dict:
     if loras not in (None, ""):
         if isinstance(loras, str):
             try:
-                loras = json.loads(loras)
-            except ValueError as exc:
-                raise ValueError("loras must be a JSON list.") from exc
-        if not isinstance(loras, list) or len(loras) > 8:
-            raise ValueError("loras must be a list of at most 8 items.")
-        parsed_loras = []
-        for item in loras:
-            if isinstance(item, str):
-                name = item.strip()
-                parsed = name
-            elif isinstance(item, dict):
-                name = str(item.get("name", "")).strip()
-                weight = float(item.get("weight", 1.0))
-                if not math.isfinite(weight) or not 0 <= weight <= 2:
-                    raise ValueError("LoRA weight must be between 0 and 2.")
-                parsed = {"name": name, "weight": weight}
-            else:
-                raise ValueError("loras entries must be strings or objects.")
-            if not name:
-                raise ValueError("LoRA name is required.")
-            parsed_loras.append(parsed)
-        options["loras"] = parsed_loras
+                parsed_json = json.loads(loras)
+                if isinstance(parsed_json, list):
+                    loras = parsed_json
+                else:
+                    raise ValueError("loras must be a JSON list.")
+            except (ValueError, TypeError) as exc:
+                if not is_form:
+                    raise ValueError("loras must be a list.") from exc
+        if isinstance(loras, list):
+            if len(loras) > 8:
+                raise ValueError("loras must be a list of at most 8 items.")
+            parsed_loras = []
+            for item in loras:
+                if isinstance(item, str):
+                    name = item.strip()
+                    parsed = name
+                elif isinstance(item, dict):
+                    name = str(item.get("name", "")).strip()
+                    weight = float(item.get("weight", 1.0))
+                    if not math.isfinite(weight) or not 0 <= weight <= 2:
+                        raise ValueError("LoRA weight must be between 0 and 2.")
+                    parsed = {"name": name, "weight": weight}
+                else:
+                    raise ValueError("loras entries must be strings or objects.")
+                if not name:
+                    raise ValueError("LoRA name is required.")
+                parsed_loras.append(parsed)
+            options["loras"] = parsed_loras
+        elif isinstance(loras, str) and is_form:
+            options["loras"] = loras.strip()
+        else:
+            raise ValueError("loras must be a list.")
 
     if data.get("cfg_scale") not in (None, ""):
-        cfg_scale = float(data["cfg_scale"])
+        try:
+            cfg_scale = float(data["cfg_scale"])
+        except (ValueError, TypeError):
+            raise ValueError("cfg_scale must be a valid number.")
         if not math.isfinite(cfg_scale) or not 1 <= cfg_scale <= 30:
             raise ValueError("cfg_scale must be between 1 and 30.")
         options["cfg_scale"] = cfg_scale
@@ -127,7 +140,14 @@ def serialized(job: Job) -> dict:
 @jobs_blueprint.post("/generate")
 @jwt_required()
 def generate():
-    data = request.get_json(silent=True) or {}
+    if request.is_json:
+        data = request.get_json(silent=True)
+        if data is None or not isinstance(data, dict):
+            return error_response("validation_error", "JSON body must be an object.", 400)
+    elif request.data:
+        return error_response("validation_error", "Request body must be a valid JSON object.", 400)
+    else:
+        data = {}
     try:
         prompt = parse_prompt(data.get("prompt"))
         negative_prompt = str(data.get("negative_prompt", "")).strip()
@@ -139,10 +159,12 @@ def generate():
             raise ValueError("Width and height must be divisible by 64.")
         steps = parse_integer(data.get("steps", 20), "steps", 1, 150)
         seed = parse_integer(data.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
-        ai_options = parse_ai_options(data)
+        ai_options = parse_ai_options(data, is_form=False)
     except ValueError as exc:
         return error_response("validation_error", str(exc), 400)
 
+    raw_loras = ai_options.get("loras")
+    stored_loras = json.dumps(raw_loras) if isinstance(raw_loras, (list, dict)) else (str(raw_loras).strip() if raw_loras else None)
     job = Job(
         user_id=current_user_id(),
         type="generate",
@@ -153,7 +175,7 @@ def generate():
         steps=steps,
         seed=seed,
         model=ai_options.get("model"),
-        loras=json.dumps(ai_options["loras"]) if "loras" in ai_options else None,
+        loras=stored_loras,
         sampler=ai_options.get("sampler"),
         scheduler=ai_options.get("scheduler"),
         cfg_scale=ai_options.get("cfg_scale"),
@@ -180,7 +202,7 @@ def edit():
         if not 0 <= strength <= 1:
             raise ValueError("Strength must be between 0 and 1.")
         seed = parse_integer(request.form.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
-        ai_options = parse_ai_options(request.form.to_dict())
+        ai_options = parse_ai_options(request.form.to_dict(), is_form=True)
 
         image = Image.open(upload.stream)
         image.verify()
@@ -196,7 +218,10 @@ def edit():
 
     source_filename = f"{uuid.uuid4()}.{image.format.lower().replace('jpeg', 'jpg')}"
     source_path = Path(current_app.config["UPLOAD_ROOT"]) / source_filename
+    source_path.parent.mkdir(parents=True, exist_ok=True)
     upload.save(source_path)
+    raw_loras = ai_options.get("loras")
+    stored_loras = json.dumps(raw_loras) if isinstance(raw_loras, (list, dict)) else (str(raw_loras).strip() if raw_loras else None)
     job = Job(
         user_id=current_user_id(),
         type="edit",
@@ -205,7 +230,7 @@ def edit():
         seed=seed,
         source_filename=source_filename,
         model=ai_options.get("model"),
-        loras=json.dumps(ai_options["loras"]) if "loras" in ai_options else None,
+        loras=stored_loras,
         sampler=ai_options.get("sampler"),
         scheduler=ai_options.get("scheduler"),
         cfg_scale=ai_options.get("cfg_scale"),
@@ -308,6 +333,13 @@ def cancel_job(job_id: str):
     job.error = "Generation cancelled by user."
     job.progress = 0
     job.completed_at = datetime.now(timezone.utc)
+    if job.source_filename:
+        source_path = Path(current_app.config["UPLOAD_ROOT"]) / job.source_filename
+        if source_path.exists():
+            try:
+                source_path.unlink()
+            except OSError:
+                pass
     db.session.commit()
     return jsonify({"job": serialized(job), "status": "cancelled"})
 

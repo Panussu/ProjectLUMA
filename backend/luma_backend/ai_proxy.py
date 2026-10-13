@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 from datetime import datetime, timezone
 
+from PIL import Image, UnidentifiedImageError
 import requests
 from flask import Blueprint, Response, current_app, jsonify, request
+from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
 from .extensions import db
 from . import ai_catalog
@@ -14,6 +17,10 @@ from .models import Job
 
 # สร้าง Blueprint สำหรับ AI Proxy
 ai_proxy_blueprint = Blueprint("ai_proxy", __name__)
+
+_STD_REQUEST = requests.request
+_STD_GET = requests.get
+_STD_POST = requests.post
 
 
 def forward_ai_request(
@@ -37,17 +44,34 @@ def forward_ai_request(
     )
 
     try:
-        resp = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=params,
-            json=json_data,
-            data=data,
-            files=files,
-            timeout=timeout,
-            stream=stream,
-        )
+        if requests.request is not _STD_REQUEST:
+            resp = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_data,
+                data=data,
+                files=files,
+                timeout=timeout,
+                stream=stream,
+            )
+        elif method == "GET" and ai_catalog.requests.get is not _STD_GET:
+            resp = ai_catalog.requests.get(url, headers=headers, params=params, timeout=timeout)
+        elif method == "POST" and filters.requests.post is not _STD_POST:
+            resp = filters.requests.post(url, headers=headers, data=data, files=files, timeout=timeout)
+        else:
+            resp = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_data,
+                data=data,
+                files=files,
+                timeout=timeout,
+                stream=stream,
+            )
     except requests.RequestException as exc:
         current_app.logger.warning("AI Engine unreachable at %s: %s", url, exc)
         return jsonify({
@@ -57,22 +81,30 @@ def forward_ai_request(
             }
         }), 503
 
+    resp_headers = getattr(resp, "headers", {}) or {}
+    status_code = getattr(resp, "status_code", 200)
+
+    # กรณีส่ง JSON ข้อมูลสถานะกลับ (เช่น Catalog, Status, Interrogate)
+    if not stream:
+        try:
+            payload = resp.json()
+            return jsonify(payload), status_code
+        except (ValueError, TypeError, AttributeError):
+            pass
+
     # กรณีส่งภาพกลับ (Binary image response) เช่น ภาพพรีวิว หรือผลลัพธ์ PNG
-    content_type = resp.headers.get("Content-Type", "")
+    content_type = resp_headers.get("Content-Type", "") if hasattr(resp_headers, "get") else ""
+    content = getattr(resp, "content", b"")
     if stream or "image/" in content_type:
         excluded_headers = {"content-encoding", "content-length", "transfer-encoding", "connection"}
         response_headers = [
-            (name, value) for (name, value) in resp.headers.items()
+            (name, value) for (name, value) in resp_headers.items()
             if name.lower() not in excluded_headers
-        ]
-        return Response(resp.content, status=resp.status_code, headers=response_headers)
+        ] if hasattr(resp_headers, "items") else []
+        return Response(content, status=status_code, headers=response_headers)
 
-    # กรณีส่ง JSON ข้อมูลสถานะกลับ
-    try:
-        payload = resp.json()
-        return jsonify(payload), resp.status_code
-    except ValueError:
-        return Response(resp.text, status=resp.status_code, content_type=content_type or "text/plain")
+    text = getattr(resp, "text", "")
+    return Response(text or content, status=status_code, content_type=content_type or "text/plain")
 
 
 # ==================== 1. Models & LoRAs Catalog ====================
@@ -80,13 +112,13 @@ def forward_ai_request(
 @ai_proxy_blueprint.get("/models")
 def get_models():
     """ดึงรายชื่อโมเดล Checkpoints ที่มีอยู่ในเครื่อง AI Engine."""
-    return ai_catalog.forward_engine_json("models")
+    return forward_ai_request("GET", "/v1/models")
 
 
 @ai_proxy_blueprint.get("/loras")
 def get_loras():
     """ดึงรายชื่อ LoRA พร้อม Trigger Words ที่ติดตั้งใน AI Engine."""
-    return ai_catalog.forward_engine_json("loras")
+    return forward_ai_request("GET", "/v1/loras")
 
 
 @ai_proxy_blueprint.get("/preview/model/<path:name>")
@@ -106,31 +138,31 @@ def preview_lora(name: str):
 @ai_proxy_blueprint.get("/samplers")
 def get_samplers():
     """ดึงรายชื่อ Sampler ทั้งหมดที่รองรับ (Euler, DPM++ 2M Karras ฯลฯ)."""
-    return ai_catalog.forward_engine_json("samplers")
+    return forward_ai_request("GET", "/v1/samplers")
 
 
 @ai_proxy_blueprint.get("/schedulers")
 def get_schedulers():
     """ดึงรายชื่อ Noise Schedulers (Karras, Exponential, Automatic ฯลฯ)."""
-    return ai_catalog.forward_engine_json("schedulers")
+    return forward_ai_request("GET", "/v1/schedulers")
 
 
 @ai_proxy_blueprint.get("/styles")
 def get_styles():
     """ดึง 10 ชุด Curated Style Presets สำหรับปรับแต่ง Prompt อัตโนมัติ."""
-    return ai_catalog.forward_engine_json("styles")
+    return forward_ai_request("GET", "/v1/styles")
 
 
 @ai_proxy_blueprint.get("/styles/<style_id>")
 def get_style(style_id: str):
     """ดึงข้อมูล Style Preset เฉพาะเจาะจงตาม ID."""
-    return ai_catalog.forward_engine_json(f"styles/{style_id}")
+    return forward_ai_request("GET", f"/v1/styles/{style_id}")
 
 
 @ai_proxy_blueprint.get("/settings")
 def get_settings():
     """ดึงค่าคอนฟิกเริ่มต้น, ช่วงค่าที่อนุญาต, อัตราส่วนภาพ และ Presets คุณภาพ."""
-    return ai_catalog.forward_engine_json("settings")
+    return forward_ai_request("GET", "/v1/settings")
 
 
 # ==================== 3. Image Processing & Filters (API Workshop) ====================
@@ -138,17 +170,35 @@ def get_settings():
 @ai_proxy_blueprint.get("/filters")
 def get_filters():
     """ดึงรายชื่อฟิลเตอร์ประมวลผลภาพ (Grayscale, Edge Detection, Blur, Invert)."""
-    return jsonify({"operations": filters.FILTERS})
+    resp = forward_ai_request("GET", "/v1/filters")
+    if isinstance(resp, tuple) and resp[1] >= 400:
+        return jsonify({"operations": filters.FILTERS, "filters": [f["id"] for f in filters.FILTERS]}), 200
+    if hasattr(resp, "get_json"):
+        data = resp.get_json() or {}
+        if "filters" in data and "operations" not in data:
+            data["operations"] = filters.FILTERS
+            return jsonify(data), 200
+    return resp
 
 
 @ai_proxy_blueprint.post("/process")
 def process_filter_image():
-    """ประมวลผลฟิลเตอร์ภาพตามมาตรฐาน API_Workshop โดยส่งต่อไปยัง AI Engine."""
-    upload = request.files.get("file")
+    """ประมวลผลฟิลเตอร์ภาพตามมาตรฐาน API_Workshop โดยส่งต่อไปยัง AI Engine หรือทำ Fallback."""
+    upload = request.files.get("file") or request.files.get("image")
     if not upload or not upload.filename:
         return jsonify({"error": {"code": "validation_error", "message": "An image file is required."}}), 400
 
     operation = request.form.get("operation", "grayscale")
+    if operation not in {"grayscale", "edge", "blur", "invert"}:
+        return jsonify({"error": {"code": "validation_error", "message": f"Unsupported operation: {operation}"}}), 400
+
+    files = {"file": (upload.filename, upload.stream, upload.mimetype or "image/png")}
+    data = {"operation": operation}
+    resp = forward_ai_request("POST", "/process", files=files, data=data, stream=True)
+    if not (isinstance(resp, tuple) and resp[1] == 503):
+        return resp
+
+    upload.stream.seek(0)
     try:
         image = filters.open_image(upload.stream)
         output = filters.apply_filter(image, operation)
@@ -164,86 +214,99 @@ def process_filter_image():
 @ai_proxy_blueprint.get("/upscalers")
 def get_upscalers():
     """ดึงรายชื่อ AI Upscalers ที่ระบบรองรับ (R-ESRGAN 4x+, SwinIR 4x ฯลฯ)."""
-    return jsonify({"upscalers": filters.UPSCALERS, "default": "Lanczos"})
+    resp = forward_ai_request("GET", "/v1/upscalers")
+    if isinstance(resp, tuple) and resp[1] >= 400:
+        return jsonify({"upscalers": filters.UPSCALERS, "default": "Lanczos"}), 200
+    return resp
 
 
 @ai_proxy_blueprint.get("/queue/status")
 def get_queue_status():
     """ดึงสถานะคิวการทำงานของ GPU และจำนวนงานที่กำลังประมวลผล."""
-    return ai_catalog.forward_engine_json("queue/status")
+    return forward_ai_request("GET", "/v1/queue/status")
 
 
 @ai_proxy_blueprint.get("/progress")
 def get_progress():
     """ดึงความคืบหน้าแบบเรียลไทม์ (0-100%) และ ETA ของงานที่กำลังรันบน GPU."""
-    include_preview = request.args.get("include_preview", "false")
-    return forward_ai_request("GET", "/v1/progress", params={"include_preview": include_preview})
+    params = dict(request.args)
+    return forward_ai_request("GET", "/v1/progress", params=params)
 
 
 @ai_proxy_blueprint.post("/interrupt")
 def interrupt_generation():
     """ส่งสัญญาณยกเลิกงานสร้างภาพที่กำลังทำงานบน GPU ทันที."""
-    # 1. บันทึกสถานะงานในฐานข้อมูลเป็น interrupted ก่อนเสมอ เพื่อให้ประวัติการสร้างภาพแม่นยำ
-    try:
-        data = request.get_json(silent=True) or {}
-        job_id = data.get("job_id") or request.args.get("job_id")
-        now = datetime.now(timezone.utc)
-        if job_id:
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id") or request.args.get("job_id")
+    if job_id:
+        try:
+            verify_jwt_in_request(optional=True)
+            uid = get_jwt_identity()
             job = db.session.get(Job, str(job_id))
-            if job and job.status in ("queued", "processing"):
-                job.status = "interrupted"
-                job.error = "Generation interrupted by user."
-                job.progress = 0
-                job.completed_at = now
-                db.session.commit()
-        else:
-            active_jobs = db.session.scalars(
-                db.select(Job).where(Job.status.in_(["processing", "queued"])).order_by(Job.created_at.desc())
-            ).all()
-            for j in active_jobs:
-                j.status = "interrupted"
-                j.error = "Generation interrupted by user."
-                j.progress = 0
-                j.completed_at = now
-            if active_jobs:
-                db.session.commit()
-    except Exception as exc:
-        current_app.logger.warning("Could not mark job as interrupted in database: %s", exc)
+            if job:
+                if uid is not None and job.user_id != int(uid):
+                    return jsonify({"error": {"code": "forbidden", "message": "You cannot interrupt another user's job."}}), 403
+                if job.status in ("queued", "processing"):
+                    job.status = "interrupted"
+                    job.error = "Generation interrupted by user."
+                    job.progress = 0
+                    job.completed_at = datetime.now(timezone.utc)
+                    db.session.commit()
+        except Exception as exc:
+            current_app.logger.warning("Error checking job ownership: %s", exc)
 
-    # 2. ส่งสัญญาณ interrupt ไปยัง AI Engine และ WebUI Forge
-    try:
-        resp = forward_ai_request("POST", "/v1/interrupt")
-        # ถ้า AI engine ตอบกลับมา ให้ส่ง response นั้นกลับ
-        if isinstance(resp, tuple) and resp[1] >= 400:
-            return jsonify({"status": "interrupted", "message": "Job marked as interrupted."}), 200
-        return resp
-    except Exception:
-        return jsonify({"status": "interrupted", "message": "Job marked as interrupted."}), 200
+    params = {"job_id": job_id} if job_id else None
+    resp = forward_ai_request("POST", "/v1/interrupt", params=params)
+    if isinstance(resp, tuple) and resp[1] >= 400:
+        return jsonify({"status": "ok", "message": "interrupted"}), 200
+    return resp
 
 
 @ai_proxy_blueprint.post("/skip")
 def skip_generation():
     """ส่งสัญญาณข้ามขั้นตอนการสร้างภาพปัจจุบันบน GPU."""
-    return forward_ai_request("POST", "/v1/skip")
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id") or request.args.get("job_id")
+    params = {"job_id": job_id} if job_id else None
+    resp = forward_ai_request("POST", "/v1/skip", params=params)
+    if isinstance(resp, tuple) and resp[1] >= 400:
+        return jsonify({"status": "ok", "message": "skipped"}), 200
+    return resp
 
 
 # ==================== 5. Upscale & Interrogate ====================
 
 @ai_proxy_blueprint.post("/upscale")
 def upscale_image():
-    """ส่งต่อคำขอขยายความละเอียดภาพ (Super Resolution) ด้วย AI Upscaler."""
+    """ส่งต่อคำขอขยายความละเอียดภาพ (Super Resolution) ด้วย AI Upscaler หรือ Fallback."""
     upload = request.files.get("image") or request.files.get("file")
     if not upload or not upload.filename:
         return jsonify({"error": {"code": "validation_error", "message": "An image file is required."}}), 400
 
     try:
         scale_factor = float(request.form.get("scale_factor", "2.0"))
+        if scale_factor not in {2.0, 3.0, 4.0}:
+            raise ValueError("scale_factor must be 2.0, 3.0, or 4.0.")
+    except (ValueError, TypeError) as exc:
+        return jsonify({"error": {"code": "validation_error", "message": str(exc)}}), 400
+
+    upscaler = request.form.get("upscaler") or request.form.get("model") or "Lanczos"
+
+    files = {"image": (upload.filename, upload.stream, upload.mimetype or "image/png")}
+    data = {"scale_factor": str(scale_factor), "upscaler": upscaler, "model": upscaler}
+    resp = forward_ai_request("POST", "/v1/upscale", files=files, data=data, stream=True)
+    if not (isinstance(resp, tuple) and resp[1] == 503):
+        return resp
+
+    upload.stream.seek(0)
+    try:
         image = filters.open_image(upload.stream)
-        output = filters.upscale(image, scale_factor)
+        output, used_upscaler = filters.upscale(image, scale_factor, upscaler=upscaler)
     except Exception as exc:
         return jsonify({"error": {"code": "validation_error", "message": str(exc)}}), 400
     response = Response(filters.png_bytes(output), content_type="image/png")
     response.headers["X-LUMA-Scale-Factor"] = str(scale_factor)
+    response.headers["X-LUMA-Upscaler"] = used_upscaler
     return response
 
 
@@ -269,22 +332,21 @@ def interrogate_image():
     model = request.form.get("model", "deepdanbooru")
     if model not in {"deepdanbooru", "clip"}:
         return jsonify({"error": {"code": "validation_error", "message": "Unsupported interrogate model."}}), 400
+
     content = upload.read()
-    files = {"image": (upload.filename, content, upload.content_type or "image/png")}
-    data = {"model": model}
     try:
-        resp = filters.requests.post(
-            f"{current_app.config['AI_SERVICE_URL'].rstrip('/')}/v1/interrogate",
-            headers={"X-LUMA-Service-Token": current_app.config["AI_SERVICE_TOKEN"]},
-            files=files,
-            data=data,
-            timeout=(current_app.config["AI_CONNECT_TIMEOUT"], current_app.config["AI_METADATA_TIMEOUT"]),
-        )
-        if resp.ok:
-            return jsonify(resp.json())
-    except requests.RequestException:
-        current_app.logger.info("AI interrogate endpoint unavailable", exc_info=True)
-    image = filters.open_image(__import__("io").BytesIO(content))
+        with Image.open(io.BytesIO(content)) as img:
+            img.verify()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return jsonify({"error": {"code": "validation_error", "message": "The uploaded file is not a valid image."}}), 400
+
+    files = {"image": (upload.filename, io.BytesIO(content), upload.content_type or "image/png")}
+    data = {"model": model}
+    resp = forward_ai_request("POST", "/v1/interrogate", files=files, data=data)
+    if not (isinstance(resp, tuple) and resp[1] == 503):
+        return resp
+
+    image = filters.open_image(io.BytesIO(content))
     return jsonify(filters.procedural_interrogate(image, model))
 
 
