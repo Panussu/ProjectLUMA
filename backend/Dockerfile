@@ -3,7 +3,7 @@ FROM python:3.12-slim
 
 # กำหนดสภาพแวดล้อมของโปรเซสภายในคอนเทนเนอร์
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOST=0.0.0.0
 # โฟลเดอร์ทำงานภายในอิมเมจ
 WORKDIR /app
 
@@ -18,6 +18,7 @@ COPY . .
 # ระบุพอร์ตของบริการ การเปิดออกเครื่อง host ต้องกำหนดเพิ่มตอนรัน
 
 EXPOSE 5000
+# ตรวจว่าเว็บในคอนเทนเนอร์ตอบคำขอได้
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/health')"
 # คำสั่งเริ่มบริการเมื่อรันคอนเทนเนอร์
 CMD ["python", "run.py"]
-
