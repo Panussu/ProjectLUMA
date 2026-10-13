@@ -1,7 +1,11 @@
 (() => {
   "use strict";
-
-const API_BASE = window.LUMA_API_BASE || "/api/v1";
+  const defaultHost = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) ? "127.0.0.1:5000" : "172.20.56.162:5000";
+  const BACKEND_HOST = (typeof window !== "undefined" && window.LUMA_BACKEND_HOST) || defaultHost;
+  const API_BASE = (typeof window !== "undefined" && window.LUMA_API_BASE)
+    || (typeof window !== "undefined" && window.location.protocol === "file:" ? `http://${BACKEND_HOST}/api/v1` : null)
+    || (typeof window !== "undefined" && window.location.port === "8080" ? `http://${BACKEND_HOST}/api/v1` : null)
+    || "/api/v1";
   const TOKEN_KEY = "luma_access_token";
   const state = {
     token: localStorage.getItem(TOKEN_KEY),
@@ -26,16 +30,16 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     isGenerating: false,
     progressPollTimer: null,
     activeJobId: null,
-    editPreviewObjectUrl: null,
   };
 
-  const $ = (selector) => document.querySelector(selector);
-  const authModal = new bootstrap.Modal($("#authModal"));
-  const toast = new bootstrap.Toast($("#appToast"), { delay: 3500 });
+  const $ = (selector) => typeof document !== "undefined" && typeof document.querySelector === "function" ? document.querySelector(selector) : null;
+  const authModal = typeof bootstrap !== "undefined" && $("#authModal") ? new bootstrap.Modal($("#authModal")) : null;
+  const toast = typeof bootstrap !== "undefined" && $("#appToast") ? new bootstrap.Toast($("#appToast"), { delay: 3500 }) : null;
 
   function showToast(message) {
-    $("#toastMessage").textContent = message;
-    toast.show();
+    const msgEl = $("#toastMessage");
+    if (msgEl) msgEl.textContent = message;
+    if (toast && typeof toast.show === "function") toast.show();
   }
 
   async function api(path, options = {}) {
@@ -852,30 +856,6 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     return path;
   }
 
-  function getDownloadUrl(url) {
-    if (!url || url.startsWith("blob:") || url.startsWith("data:")) {
-      return url;
-    }
-
-    try {
-      const parsedUrl = new URL(url, window.location.href);
-
-      if (!parsedUrl.pathname.startsWith("/media/")) {
-        return url;
-      }
-
-      parsedUrl.searchParams.set("download", "1");
-
-      if (/^https?:\/\//i.test(url)) {
-        return parsedUrl.toString();
-      }
-
-      return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
-    } catch {
-      return url;
-    }
-  }
-
   function stopPolling() {
     if (state.pollTimer) {
       clearInterval(state.pollTimer);
@@ -907,7 +887,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
     $("#resultImage").src = state.activeImageUrl;
     $("#resultPrompt").textContent = job.prompt;
-    $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
+    $("#downloadButton").href = state.activeImageUrl;
     $("#downloadButton").download = `luma-${job.id.slice(0, 8)}.png`;
     loadJobs();
   }
@@ -971,7 +951,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     state.progressPollTimer = setInterval(async () => {
       if (!state.isGenerating) return;
       try {
-        const prog = await api("/progress?include_preview=true");
+        const prog = await api(`/progress?include_preview=true&job_id=${encodeURIComponent(jobId)}`);
         if (prog && prog.active) {
           const pct = Math.max(1, Math.min(99, Math.round(prog.progress_percent || (prog.progress * 100))));
           updateLiveProgressDisplay(pct, prog);
@@ -988,6 +968,15 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
         if (job.status === "completed") {
           stopPolling();
           return showResult(job);
+        }
+        if (job.status === "cancelled" || job.status === "interrupted") {
+          stopPolling();
+          setGeneratingState(false);
+          $("#jobProgress")?.classList.add("d-none");
+          $("#emptyResult")?.classList.remove("d-none");
+          showToast(job.error || "Generation was cancelled.");
+          loadJobs();
+          return;
         }
         if (job.status === "failed") {
           stopPolling();
@@ -1058,71 +1047,6 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     }
   }
 
-  function setEditImagePreview(fileOrUrl) {
-    if (state.editPreviewObjectUrl) {
-      URL.revokeObjectURL(state.editPreviewObjectUrl);
-      state.editPreviewObjectUrl = null;
-    }
-
-    const uploadZone = $("#editUploadZone");
-    const uploadPrompt = $("#editUploadPrompt");
-    const previewContainer = $("#editPreviewContainer");
-    const previewImg = $("#editImagePreview");
-    const fileNameEl = $("#fileName");
-    const changeHint = $("#editChangeHint");
-
-    if (!fileOrUrl) {
-      const fileInput = $("#editImage");
-      if (fileInput) fileInput.value = "";
-      if (previewImg) {
-        previewImg.src = "";
-        previewImg.style.display = "none";
-      }
-      if (fileNameEl) fileNameEl.textContent = "";
-      uploadPrompt?.classList.remove("d-none");
-      previewContainer?.classList.add("d-none");
-      uploadZone?.classList.remove("has-preview");
-      changeHint?.classList.add("d-none");
-      return;
-    }
-
-    let src = "";
-    let name = "";
-
-    if (typeof fileOrUrl === "string") {
-      src = fileOrUrl;
-      name = fileOrUrl.split("/").pop()?.split("?")[0] || "image.png";
-    } else if (fileOrUrl instanceof Blob || fileOrUrl instanceof File) {
-      name = fileOrUrl.name || "image.png";
-      try {
-        src = URL.createObjectURL(fileOrUrl);
-        state.editPreviewObjectUrl = src;
-      } catch {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          if (previewImg) {
-            previewImg.src = e.target.result;
-            previewImg.style.display = "block";
-          }
-        };
-        reader.readAsDataURL(fileOrUrl);
-      }
-    }
-
-    if (src && previewImg) {
-      previewImg.src = src;
-      previewImg.style.display = "block";
-    }
-    if (fileNameEl) {
-      fileNameEl.textContent = name;
-    }
-
-    uploadPrompt?.classList.add("d-none");
-    previewContainer?.classList.remove("d-none");
-    uploadZone?.classList.add("has-preview");
-    changeHint?.classList.remove("d-none");
-  }
-
   async function submitEdit(event) {
     event.preventDefault();
     // If edit is active, clicking the button again INTERRUPTS the process!
@@ -1172,7 +1096,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
     if (operation === "original") {
       $("#resultImage").src = state.activeImageUrl;
-      $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
+      $("#downloadButton").href = state.activeImageUrl;
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-original.png`;
       return;
     }
@@ -1180,7 +1104,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     // Fast return from memory cache if already processed
     if (state.filterCache[operation]) {
       $("#resultImage").src = state.filterCache[operation];
-      $("#downloadButton").href = getDownloadUrl(state.filterCache[operation]);
+      $("#downloadButton").href = state.filterCache[operation];
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${operation}.png`;
       return;
     }
@@ -1207,7 +1131,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
 
       if (state.currentFilter === operation) {
         $("#resultImage").src = filteredUrl;
-        $("#downloadButton").href = getDownloadUrl(filteredUrl);
+        $("#downloadButton").href = filteredUrl;
         $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${operation}.png`;
       }
       showToast(`Applied ${operation} filter.`);
@@ -1219,8 +1143,6 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       });
       state.currentFilter = "original";
       $("#resultImage").src = state.activeImageUrl;
-      $("#downloadButton").href = getDownloadUrl(state.activeImageUrl);
-      $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-original.png`;
     } finally {
       if (overlay) overlay.classList.add("d-none");
     }
@@ -1258,7 +1180,7 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       const upscaledUrl = URL.createObjectURL(upscaledBlob);
       state.filterCache[`upscale_${scaleFactor}x_${upscaler}`] = upscaledUrl;
       $("#resultImage").src = upscaledUrl;
-      $("#downloadButton").href = getDownloadUrl(upscaledUrl);
+      $("#downloadButton").href = upscaledUrl;
       $("#downloadButton").download = `luma-${state.activeJob?.id?.slice(0, 8) || "art"}-${scaleFactor}x.png`;
       showToast(`Upscaled ${scaleFactor}x with ${upscaler} successfully!`);
     } catch (err) {
@@ -1345,6 +1267,26 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     }
   }
 
+  async function bookmarkJob(jobId, tags = []) {
+    if (!state.token) {
+      showToast("Please log in to bookmark jobs");
+      return null;
+    }
+    try {
+      const payload = { job_id: jobId };
+      if (tags && tags.length > 0) payload.tags = tags;
+      const res = await api("/prompts/favorites", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      showToast("Job bookmarked to favorites!");
+      return res;
+    } catch (err) {
+      showToast(`Failed to bookmark job: ${err.message}`);
+      throw err;
+    }
+  }
+
   function selectMode(mode) {
     const isGenerate = mode === "generate";
     const isEdit = mode === "edit";
@@ -1361,10 +1303,6 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     $("#generateForm")?.classList.toggle("d-none", !isGenerate);
     $("#editForm")?.classList.toggle("d-none", !isEdit);
     $("#pngInfoForm")?.classList.toggle("d-none", !isPngInfo);
-
-    if (isEdit && $("#editImage")?.files?.[0] && !state.editPreviewObjectUrl) {
-      setEditImagePreview($("#editImage").files[0]);
-    }
 
     // Toggle right-hand image panel
     const pngRight = $("#pngInfoResultView");
@@ -1526,9 +1464,9 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
       const dt = new DataTransfer();
       dt.items.add(state.pngInfoData.file);
       $("#editImage").files = dt.files;
-      setEditImagePreview(state.pngInfoData.file);
+      $("#fileName").textContent = state.pngInfoData.file.name;
     } catch {
-      setEditImagePreview(state.pngInfoData.file);
+      // Fallback
     }
 
     if (state.pngInfoData.parsed?.prompt) {
@@ -2027,38 +1965,40 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
   negPromptEl?.addEventListener("keydown", handleTagKeydown);
 
   // Outside click & Escape to close popups
-  document.addEventListener("click", (e) => {
-    if (!$("#modelDropdownContainer")?.contains(e.target)) {
-      closeModelDropdown();
-    }
-    if (!$("#loraDropdownContainer")?.contains(e.target)) {
-      closeLoraDropdown();
-    }
-    if (!$("#presetsToggleBtn")?.contains(e.target) && !$("#presetsMenu")?.contains(e.target)) {
-      $("#presetsMenu")?.classList.add("d-none");
-    }
-    if (!$("#tagCompleteMenu")?.contains(e.target) && e.target !== promptEl && e.target !== negPromptEl) {
-      hideTagComplete();
-    }
-  });
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("click", (e) => {
+      if (!$("#modelDropdownContainer")?.contains(e.target)) {
+        closeModelDropdown();
+      }
+      if (!$("#loraDropdownContainer")?.contains(e.target)) {
+        closeLoraDropdown();
+      }
+      if (!$("#presetsToggleBtn")?.contains(e.target) && !$("#presetsMenu")?.contains(e.target)) {
+        $("#presetsMenu")?.classList.add("d-none");
+      }
+      if (!$("#tagCompleteMenu")?.contains(e.target) && e.target !== promptEl && e.target !== negPromptEl) {
+        hideTagComplete();
+      }
+    });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeModelDropdown();
-      closeLoraDropdown();
-      $("#presetsMenu")?.classList.add("d-none");
-      hideTagComplete();
-    }
-  });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeModelDropdown();
+        closeLoraDropdown();
+        $("#presetsMenu")?.classList.add("d-none");
+        hideTagComplete();
+      }
+    });
+  }
 
   // Studio & Auth forms
-  $("#loginButton").addEventListener("click", () => openAuth("login"));
-  $("#heroSignIn").addEventListener("click", () => openAuth("login"));
-  $("#logoutButton").addEventListener("click", () => logout());
-  $("#authSwitch").addEventListener("click", () => openAuth(state.authMode === "login" ? "register" : "login"));
-  $("#authForm").addEventListener("submit", handleAuth);
-  $("#generateForm").addEventListener("submit", submitGeneration);
-  $("#editForm").addEventListener("submit", submitEdit);
+  $("#loginButton")?.addEventListener("click", () => openAuth("login"));
+  $("#heroSignIn")?.addEventListener("click", () => openAuth("login"));
+  $("#logoutButton")?.addEventListener("click", () => logout());
+  $("#authSwitch")?.addEventListener("click", () => openAuth(state.authMode === "login" ? "register" : "login"));
+  $("#authForm")?.addEventListener("submit", handleAuth);
+  $("#generateForm")?.addEventListener("submit", submitGeneration);
+  $("#editForm")?.addEventListener("submit", submitEdit);
   $("#generateSubmitBtn")?.addEventListener("click", (e) => {
     if (state.isGenerating) {
       e.preventDefault();
@@ -2075,95 +2015,80 @@ const API_BASE = window.LUMA_API_BASE || "/api/v1";
     e.preventDefault();
     interruptCurrentGeneration();
   });
-  $("#generateTab").addEventListener("click", () => selectMode("generate"));
-  $("#editTab").addEventListener("click", () => selectMode("edit"));
+  $("#generateTab")?.addEventListener("click", () => selectMode("generate"));
+  $("#editTab")?.addEventListener("click", () => selectMode("edit"));
   $("#pngInfoTab")?.addEventListener("click", () => selectMode("pnginfo"));
-  $("#refreshJobs").addEventListener("click", loadJobs);
-  $("#prompt").addEventListener("input", (event) => { $("#promptCount").textContent = `${event.target.value.length} / 1000`; });
+  $("#refreshJobs")?.addEventListener("click", loadJobs);
+  $("#prompt")?.addEventListener("input", (event) => {
+    const counter = $("#promptCount");
+    if (counter) counter.textContent = `${event.target.value.length} / 1000`;
+  });
   $("#negativePrompt")?.addEventListener("input", (event) => {
     const counter = $("#negativePromptCount");
     if (counter) counter.textContent = `${event.target.value.length} / 1000`;
   });
-  $("#strength").addEventListener("input", (event) => { $("#strengthValue").textContent = `${Math.round(Number(event.target.value) * 100)}%`; });
-
+  $("#strength")?.addEventListener("input", (event) => {
+    const val = $("#strengthValue");
+    if (val) val.textContent = `${Math.round(Number(event.target.value) * 100)}%`;
+  });
   $("#editImage")?.addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) setEditImagePreview(file);
+    const fn = $("#fileName");
+    if (fn) fn.textContent = event.target.files[0]?.name || "";
   });
 
-  $("#editImage")?.addEventListener("input", (event) => {
-    const file = event.target.files?.[0];
-    if (file) setEditImagePreview(file);
-  });
-
-  $("#editClearBtn")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setEditImagePreview(null);
-  });
-
-  const editUploadZone = $("#editUploadZone");
-  editUploadZone?.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    editUploadZone.classList.add("dragging");
-  });
-  editUploadZone?.addEventListener("dragleave", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    editUploadZone.classList.remove("dragging");
-  });
-  editUploadZone?.addEventListener("drop", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    editUploadZone.classList.remove("dragging");
-    const files = event.dataTransfer?.files;
-    if (files && files.length > 0) {
-      try {
-        const dt = new DataTransfer();
-        dt.items.add(files[0]);
-        $("#editImage").files = dt.files;
-      } catch {
-        // Fallback
-      }
-      setEditImagePreview(files[0]);
-    }
-  });
-
-  document.addEventListener("paste", (event) => {
-    if ($("#editForm")?.classList.contains("d-none")) return;
-    const items = event.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file) {
-          try {
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            $("#editImage").files = dt.files;
-          } catch {
-            // Fallback
-          }
-          setEditImagePreview(file);
-          showToast("Image pasted from clipboard!");
-          break;
-        }
-      }
-    }
-  });
-
-  // Initial loads
-  checkHealth();
-  restoreSession();
-  loadModels();
-  loadLoras();
-  loadSamplers();
-  loadSchedulers();
-  loadUpscalers();
-  loadDanbooruTags();
-  if ($("#editImage")?.files?.[0]) {
-    setEditImagePreview($("#editImage").files[0]);
+  // Initial loads (only in browser environments)
+  if (typeof window !== "undefined" && typeof window.document !== "undefined" && typeof location !== "undefined" && typeof module === "undefined") {
+    checkHealth();
+    restoreSession();
+    loadModels();
+    loadLoras();
+    loadSamplers();
+    loadSchedulers();
+    loadUpscalers();
+    loadDanbooruTags();
+    setInterval(checkHealth, 30000);
   }
-  setInterval(checkHealth, 30000);
+
+  // Exports for Node.js / test harness
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      state,
+      api,
+      apiBlob,
+      bookmarkJob,
+      pollJob,
+      interruptCurrentGeneration,
+      selectMode,
+      loadJobs,
+      checkHealth,
+      restoreSession,
+      loadModels,
+      loadLoras,
+      loadSamplers,
+      loadSchedulers,
+      loadUpscalers,
+      loadDanbooruTags,
+    };
+  }
+
+  if (typeof window !== "undefined") {
+    window.LumaApp = {
+      state,
+      api,
+      apiBlob,
+      bookmarkJob,
+      pollJob,
+      interruptCurrentGeneration,
+      selectMode,
+      loadJobs,
+      checkHealth,
+      restoreSession,
+      loadModels,
+      loadLoras,
+      loadSamplers,
+      loadSchedulers,
+      loadUpscalers,
+      loadDanbooruTags,
+    };
+  }
 })();
