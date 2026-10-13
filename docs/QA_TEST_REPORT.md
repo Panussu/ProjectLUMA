@@ -24,7 +24,7 @@ GitHub component revisions were checked again and were unchanged:
 - Backend: `1919a02`
 - Frontend: `3f940c1`
 
-The fixes remain local and have not been pushed to GitHub. Use the supplied patches or repaired files to integrate them before expecting these results from another checkout.
+The repaired source is included in this integrated review branch. Merge it before expecting these results from main or the unchanged individual component branches.
 
 The recheck exercised authentication, ownership, job isolation, cancellation races, recovery, generation/editing, signed downloads, image filters, resize selection, metadata, tag limits, upload validation, frontend interactions, and both documentation pages. HTTP/browser generation used the development procedural provider and synthetic test data.
 

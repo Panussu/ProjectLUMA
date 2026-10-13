@@ -34,7 +34,7 @@ GitHub `main` remained unchanged at `bdfd3ed`. These component changes had not b
 
 ## 2. Fixes implemented locally
 
-The failed cases were repaired in a separate Git checkout on local branch `fix/audit-20261014`. The original checkout and its untracked overview folder were preserved. No changes were pushed to GitHub.
+The failed cases were repaired in a separate Git checkout on local branch `fix/audit-20261014`. The original checkout and its untracked overview folder were preserved. At the time of the local audit, no changes had been pushed. The repaired source is now included in this integrated review branch, awaiting merge into main.
 
 ### Authentication and ownership
 

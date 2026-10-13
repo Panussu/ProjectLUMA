@@ -138,5 +138,3 @@ class FavoritePrompt(db.Model):
             "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
             "updated_at": self.updated_at.isoformat().replace("+00:00", "Z"),
         }
-
-
