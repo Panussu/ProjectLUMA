@@ -30,6 +30,8 @@ services:
       AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-local-development-service-token}
       DATABASE_URL: sqlite:////data/luma.db
       DATA_ROOT: /data
+      UPLOAD_ROOT: /data/uploads
+      RECOVER_JOBS_ON_STARTUP: "1"
       MEDIA_ROOT: /media
       CORS_ORIGINS: http://localhost
     # พื้นที่จัดเก็บถาวรหรือการเชื่อม volume ของบริการตามระดับของบล็อก

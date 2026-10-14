@@ -9,11 +9,13 @@ $pipPath = Join-Path $serviceRoot ".venv\Scripts\pip.exe"
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     python -m venv (Join-Path $serviceRoot ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "Python environment creation failed." }
 }
 
 # ติดตั้งไลบรารีตามรายการที่กำหนดไว้ในบริการ
 
 & $pipPath install -r (Join-Path $serviceRoot "requirements.txt") --disable-pip-version-check
+if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed; service was not started." }
 
 # สร้าง .env เฉพาะเมื่อยังไม่มี เพื่อไม่เขียนทับค่าของผู้ใช้
 
@@ -27,6 +29,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $serviceRoot ".env"))) {
 Push-Location $serviceRoot
 try {
     & $pythonPath app.py
+    if ($LASTEXITCODE -ne 0) { throw "Service exited with an error." }
 } finally {
     Pop-Location
 }

@@ -16,11 +16,13 @@ $environmentPath = Join-Path $serviceRoot ".env"
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     python -m venv (Join-Path $serviceRoot ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "Python environment creation failed." }
 }
 
 # ติดตั้งไลบรารีตามรายการที่กำหนดไว้ในบริการ
 
 & $pipPath install -r (Join-Path $serviceRoot "requirements.txt") --disable-pip-version-check
+if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed; service was not started." }
 
 # เลือกตัวอย่างค่าพัฒนาหรือ VLAN และให้แก้ค่าตัวอย่างก่อนเปิดบนเครือข่าย
 
@@ -38,6 +40,7 @@ if (-not (Test-Path -LiteralPath $environmentPath)) {
 Push-Location $serviceRoot
 try {
     & $pythonPath run.py
+    if ($LASTEXITCODE -ne 0) { throw "Service exited with an error." }
 } finally {
     Pop-Location
 }

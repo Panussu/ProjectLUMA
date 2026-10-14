@@ -128,3 +128,13 @@ SQLite is appropriate for the classroom demonstration and a single Flask process
 - Failed job count and messages
 - Database and media restore test
 
+
+## Docker production profile
+
+The production Compose profile sets `DEPLOYMENT_MODE=production`, persists queued edit uploads under `/data/uploads`, and enables startup recovery. Supply distinct non-placeholder `SECRET_KEY` and `JWT_SECRET_KEY` values and a matching `AI_SERVICE_TOKEN`, each at least 32 characters.
+
+When selecting `AI_PROVIDER=forge`, set `FORGE_URL` to an address reachable **from the AI container**. The default `http://host.docker.internal:7860` targets a Forge service on the Docker Desktop host. Forge bound only to the host loopback interface may not accept this connection; explicitly configure its listener and permitted network access for this topology. For the native three-PC setup above, Forge and the AI wrapper can continue using `127.0.0.1` on the same PC.
+
+Optional `FORGE_USERNAME` and `FORGE_PASSWORD` configure Forge API Basic authentication. They are separate from LUMA user credentials and the AI service token.
+
+Compose configuration validation does not confirm a running container stack or real Forge generation. Verify both before the demonstration.

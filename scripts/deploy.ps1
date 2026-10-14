@@ -25,6 +25,7 @@ if (-not (Test-Path $fullPath)) {
 if ($Down) {
     Write-Host "[i] Stopping Docker Compose stack..." -ForegroundColor Yellow
     docker compose -f $fullPath down
+    if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed to stop the stack." }
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
     exit 0
 }
@@ -38,6 +39,7 @@ Write-Host "[i] Starting Docker Compose ($composeFile)..." -ForegroundColor Cyan
 Push-Location $repoRoot
 try {
     docker @cmdArgs
+    if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed to start the stack." }
     Write-Host "[OK] ProjectLUMA stack launched successfully." -ForegroundColor Green
 } finally {
     Pop-Location
