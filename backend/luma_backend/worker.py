@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -30,6 +31,8 @@ def queue_job(app: Flask, job_id: str) -> None:
 
 def process_job(app: Flask, job_id: str) -> None:
     source_to_remove: Path | None = None
+    result_path: Path | None = None
+    saved = False
     with app.app_context():
         job = db.session.get(Job, job_id)
         if job is None or job.status != "queued":
@@ -159,7 +162,12 @@ def process_job(app: Flask, job_id: str) -> None:
                       "completed_at": datetime.now(timezone.utc), "error": None}
             returned_seed = response.headers.get("X-LUMA-Seed")
             if returned_seed:
-                values["seed"] = int(returned_seed)
+                try:
+                    parsed_seed = int(returned_seed)
+                    if 0 <= parsed_seed <= 4_294_967_295:
+                        values["seed"] = parsed_seed
+                except (ValueError, TypeError):
+                    pass  # Optional malformed metadata must not discard a valid image.
             with db.session.no_autoflush:
                 persist_ai_result(current_job, response.headers)
                 completed = db.session.execute(
@@ -171,14 +179,17 @@ def process_job(app: Flask, job_id: str) -> None:
                 result_path.unlink(missing_ok=True)
                 return
             db.session.commit()
+            saved = True
         except requests.Timeout:
             record_failure(job_id, "The AI service timed out before completing the job.")
         except requests.RequestException:
             record_failure(job_id, "The AI service is currently unreachable.")
         except Exception as exc:
             logger.exception("Job %s failed", job_id)
-            record_failure(job_id, str(exc)[:1000])
+            record_failure(job_id, str(exc)[:1000] if isinstance(exc, JobFailure) else "The server could not complete this image job.")
         finally:
+            if result_path is not None and not saved:
+                result_path.unlink(missing_ok=True)
             if source_to_remove is not None:
                 source_to_remove.unlink(missing_ok=True)
 
@@ -231,6 +242,8 @@ def persist_ai_result(job: Job, headers) -> None:
         try:
             parsed = float(value)
         except ValueError:
+            continue
+        if not math.isfinite(parsed):
             continue
         result[key] = int(parsed) if key in {"steps", "clip_skip"} else parsed
     if "steps" in result:

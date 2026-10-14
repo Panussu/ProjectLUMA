@@ -29,6 +29,8 @@ def png_bytes(image: Image.Image) -> bytes:
 
 def open_image(stream) -> Image.Image:
     image = Image.open(stream)
+    if image.width * image.height > 4_194_304:
+        raise ValueError("The input image has too many pixels.")
     image.load()
     return image.convert("RGB")
 
@@ -51,6 +53,8 @@ def apply_filter(image: Image.Image, operation: str) -> Image.Image:
 def upscale(image: Image.Image, scale_factor: float, upscaler: str = "Lanczos") -> tuple[Image.Image, str]:
     if scale_factor not in {2.0, 3.0, 4.0}:
         raise ValueError("scale_factor must be 2.0, 3.0, or 4.0.")
+    if image.width * scale_factor > 4096 or image.height * scale_factor > 4096:
+        raise ValueError("Upscaled dimensions cannot exceed 4096 pixels.")
     width = int(image.width * scale_factor)
     height = int(image.height * scale_factor)
     resample_map = {

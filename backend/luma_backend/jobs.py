@@ -153,11 +153,11 @@ def generate():
         negative_prompt = str(data.get("negative_prompt", "")).strip()
         if len(negative_prompt) > 1000:
             raise ValueError("Negative prompt cannot exceed 1000 characters.")
-        width = parse_integer(data.get("width", 512), "width", 256, 1536)
-        height = parse_integer(data.get("height", 512), "height", 256, 1536)
+        width = parse_integer(data.get("width", 512), "width", 256, 1024)
+        height = parse_integer(data.get("height", 512), "height", 256, 1024)
         if width % 64 or height % 64:
             raise ValueError("Width and height must be divisible by 64.")
-        steps = parse_integer(data.get("steps", 20), "steps", 1, 150)
+        steps = parse_integer(data.get("steps", 20), "steps", 1, 50)
         seed = parse_integer(data.get("seed", secrets.randbits(32)), "seed", 0, 4_294_967_295)
         ai_options = parse_ai_options(data, is_form=False)
     except ValueError as exc:
@@ -213,7 +213,7 @@ def edit():
         if image.width * image.height > 4_194_304:
             raise ValueError("The input image has too many pixels.")
         upload.stream.seek(0)
-    except (ValueError, UnidentifiedImageError) as exc:
+    except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         return error_response("validation_error", str(exc) or "The uploaded file is not a valid image.", 400)
 
     source_filename = f"{uuid.uuid4()}.{image.format.lower().replace('jpeg', 'jpg')}"
@@ -399,27 +399,14 @@ def media(filename: str):
             401,
         )
 
-    keys_to_try = [
-        current_app.config.get("SECRET_KEY", "development-secret-change-me"),
-        "development-secret-change-me",
-        "replace-with-a-long-random-value",
-    ]
-    payload = None
-    expired = False
-    for k in keys_to_try:
-        try:
-            payload = URLSafeTimedSerializer(k, salt="luma-media").loads(
-                token, max_age=current_app.config.get("MEDIA_TOKEN_MAX_AGE", 3600)
-            )
-            break
-        except SignatureExpired:
-            expired = True
-        except BadSignature:
-            continue
-
-    if payload is None:
-        if expired:
-            return error_response("media_link_expired", "This image link has expired. Refresh the job to receive a new link.", 401)
+    # Verify only the configured secret; public example keys are never trusted.
+    try:
+        payload = serializer().loads(token, max_age=current_app.config.get("MEDIA_TOKEN_MAX_AGE", 3600))
+    except SignatureExpired:
+        return error_response("media_link_expired", "This image link has expired. Refresh the job to receive a new link.", 401)
+    except BadSignature:
+        return error_response("invalid_media_link", "This image link is invalid.", 401)
+    if not isinstance(payload, dict):
         return error_response("invalid_media_link", "This image link is invalid.", 401)
 
     if payload.get("file") != filename:

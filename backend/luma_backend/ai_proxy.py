@@ -84,6 +84,11 @@ def forward_ai_request(
     resp_headers = getattr(resp, "headers", {}) or {}
     status_code = getattr(resp, "status_code", 200)
 
+    # Keep provider internals out of public error responses.
+    if status_code >= 500:
+        code = 503 if status_code == 503 else 502
+        return jsonify({"error": {"code": "ai_service_error", "message": "The AI service could not complete the request."}}), code
+
     # กรณีส่ง JSON ข้อมูลสถานะกลับ (เช่น Catalog, Status, Interrogate)
     if not stream:
         try:

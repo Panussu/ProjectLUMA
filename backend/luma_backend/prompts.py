@@ -57,7 +57,9 @@ def list_favorites():
 @prompts_blueprint.post("/favorites")
 @jwt_required()
 def create_favorite():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return error_response("validation_error", "JSON body must be an object.", 400)
     user_id = current_user_id()
     if data.get("job_id"):
         job = db.session.scalar(db.select(Job).where(Job.id == str(data["job_id"]), Job.user_id == user_id))
@@ -107,7 +109,9 @@ def update_favorite(favorite_id: int):
     favorite = db.session.scalar(db.select(FavoritePrompt).where(FavoritePrompt.id == favorite_id, FavoritePrompt.user_id == current_user_id()))
     if favorite is None:
         return error_response("favorite_not_found", "The requested favorite does not exist.", 404)
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return error_response("validation_error", "JSON body must be an object.", 400)
     if "title" in data:
         title = str(data["title"] or "").strip()
         if not title or len(title) > 100:

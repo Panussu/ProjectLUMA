@@ -124,7 +124,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         app,
         resources={r"/*": {"origins": app.config["CORS_ORIGINS"]}},
         allow_headers=["Content-Type", "Authorization"],
-        methods=["GET", "POST", "OPTIONS"],
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     )
 
     app.register_blueprint(auth_blueprint, url_prefix="/api/v1/auth")
@@ -163,7 +163,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         remote_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "-")
-        target_path = request.full_path.rstrip("?") if request.query_string else request.path
+        target_path = request.path  # Signed query tokens must never enter application logs.
         app.logger.info('%s - "%s %s" %s', remote_ip, request.method, target_path, response.status_code)
         return response
 
