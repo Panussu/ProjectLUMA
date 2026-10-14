@@ -24,6 +24,77 @@ Browser → Frontend/Nginx → Flask Backend → FastAPI AI Engine → Forge
 
 `development-procedural` ใช้ Pillow และ CPU สำหรับทดสอบระบบ ไม่ใช่โมเดลสร้างภาพที่ผ่านการฝึก Backend ใช้คิวใน process จึงควรเปิดหนึ่ง process จนกว่าจะใช้ shared queue ส่วน Forge ถูกจำกัดให้ทำงานทีละงาน เพราะ progress/interrupt ใช้สถานะร่วมกัน หลีกเลี่ยงการสร้างภาพผ่านหน้า Forge พร้อมกับ LUMA
 
+## Infrastructure: ระบบ Distributed System แบบ 3 PCs
+
+โครงการนี้ใช้ **คอมพิวเตอร์ 3 เครื่อง** ตามแผนภาพต้นฉบับ แต่ละเครื่องมี IP Address แยกกันและเชื่อมต่อผ่านเครือข่าย LAN/VLAN ที่สื่อสารถึงกันได้ Frontend กับ Nginx อยู่เครื่องเดียวกัน และ Flask กับ SQLite อยู่เครื่องเดียวกัน IP ด้านล่างตรงกับแผนภาพและไฟล์ VLAN example; ตรวจ IP จริงก่อนเปิดบริการ ไม่ใช่หลักฐานว่าทดสอบเครือข่ายจริงแล้ว
+
+![Distributed System ตามแผนภาพโครงการ](docs/images/infrastructure/distributed-system.png)
+
+*ภาพที่ 1: Browser เข้า Nginx แล้วเรียก Frontend/Flask; Flask ติดต่อ AI Server และ SQLite*
+
+### เครื่อง บริการ และ IP Address
+
+| เครื่องตาม deployment ปัจจุบัน | IP ตามแผนภาพ | บริการและข้อมูล |
+| --- | --- | --- |
+| PC 2 — Frontend + Nginx | `192.168.1.10` | HTML, CSS, JavaScript, Bootstrap และ reverse proxy; Browser เข้า `http://192.168.1.10` |
+| PC 3 — Flask + SQLite | `192.168.1.20` | Flask API port `5000`, authentication, jobs, logging, database และไฟล์ภาพ |
+| PC 1 — AI Server | `192.168.1.30` | FastAPI port `8000` และ Forge บนเครื่องเดียวกันที่ `127.0.0.1:7860` |
+
+หมายเลข PC ใช้ตามคู่มือ deployment ใน repository ไม่ใช่หมายเลขสมาชิกในตารางแบ่งหน้าที่
+
+### ข้อมูลและ protocol ที่ใช้
+
+แผนภาพระบุองค์ประกอบและ IP ส่วน ports/protocol ด้านล่างอ้างอิง configuration ที่ใช้อยู่ (`nginx/luma.conf` และไฟล์ `.env.vlan.example`):
+
+| การเชื่อมต่อ | Protocol / ข้อมูล | รายละเอียด |
+| --- | --- | --- |
+| Browser → Nginx `.10:80` | HTTP บน TCP; HTML/CSS/JS, JSON และไฟล์ภาพ | Nginx ส่งหน้าเว็บและไฟล์ static; browser ใช้ origin เดียวกัน |
+| Nginx → Flask `.20:5000` | HTTP reverse proxy | ส่ง `/api/` และ `/media/` ไป Flask พร้อม forwarded headers; user authentication ใช้ JWT |
+| Flask → FastAPI `.30:8000` | HTTP API; JSON/ข้อมูลภาพตาม endpoint | ใช้ `X-LUMA-Service-Token` และ `X-LUMA-Job-ID` เพื่อเชื่อมบริการและระบุงาน |
+| FastAPI → Forge `127.0.0.1:7860` | HTTP API; JSON และภาพ Base64 ตาม Forge contract | ใช้ `/sdapi/v1/txt2img` และ `/sdapi/v1/img2img`; Forge อยู่ภายใน PC 1 |
+| Flask → SQLite บน `.20` | การอ่าน/เขียนไฟล์ผ่าน SQLite/SQLAlchemy | ฐานข้อมูลเริ่มต้น `backend/data/luma.db`; ไม่มี database TCP port หรือ SQLite server แยก |
+
+Configuration VLAN ปัจจุบันเป็น HTTP ไม่ได้ตั้ง HTTPS/TLS ในไฟล์ตัวอย่าง SQLite ที่แสดง IP `.20` ในภาพหมายถึงฐานข้อมูลอยู่บนเครื่อง Backend ไม่ใช่บริการฐานข้อมูลที่เปิดให้เครื่องอื่นเชื่อมต่อโดยตรง
+
+### ขั้นตอนการทำงาน
+
+1. ผู้ใช้เปิด `http://192.168.1.10` ผ่าน Browser; Nginx ส่ง Frontend ให้แสดงหน้าเว็บ
+2. ผู้ใช้ลงทะเบียน/เข้าสู่ระบบ Frontend ส่ง API ผ่าน Nginx ไป Flask ซึ่งตรวจข้อมูลกับ SQLite และออก JWT
+3. ผู้ใช้ส่ง prompt หรือภาพสำหรับแก้ไข Flask ตรวจสิทธิ์และข้อมูล สร้าง job แล้วตอบ HTTP 202 พร้อมข้อมูลติดตามงาน
+4. Flask เรียก FastAPI ที่ `192.168.1.30:8000`; FastAPI จัดคิวและเรียก Forge ภายในเครื่อง AI
+5. Frontend ติดตามสถานะงานผ่าน Nginx/Flask ทุกประมาณ 1 วินาที โดยตรวจเจ้าของงานก่อนคืนข้อมูล
+6. เมื่อได้ผล Flask จัดเก็บไฟล์ภาพและบันทึกข้อมูลใน SQLite; Browser เรียกภาพผ่าน `/media/` ซึ่ง Flask ตรวจ JWT หรือ signed URL ก่อนส่งภาพ
+7. Favorites, history และการยกเลิกงานใช้ Backend ตรวจเจ้าของข้อมูลเช่นเดียวกัน Browser ไม่ติดต่อ Forge หรือ SQLite โดยตรง
+
+### ตั้งค่าให้ตรงกับแผนภาพ
+
+- PC 2: `nginx/luma.conf` ใช้ `server_name 192.168.1.10` และ upstream `192.168.1.20:5000`; แก้ frontend root ให้ตรงกับ path จริง
+- PC 3: `backend/.env.vlan.example` กำหนด `AI_SERVICE_URL=http://192.168.1.30:8000` และ `CORS_ORIGINS=http://192.168.1.10`
+- PC 1: `ai-engine/.env.vlan.example` กำหนด port `8000`, `AI_PROVIDER=forge` และ `FORGE_URL=http://127.0.0.1:7860`
+- ตั้ง shared service token ให้ตรงกันบน PC 1/PC 3 และเปลี่ยน signing secrets ของ Backend เปิด firewall ให้ Nginx ติดต่อ Backend และ Backend ติดต่อ AI ได้ โดยไม่จำเป็นต้องเปิด Forge ให้ทุกเครื่อง
+
+### การแบ่งหน้าที่ในทีม
+
+![ตัวอย่างการแบ่งหน้าที่จากเอกสารต้นฉบับ](docs/images/infrastructure/team-roles.png)
+
+*ภาพที่ 2: ตัวอย่างบทบาทสมาชิก ไม่ใช่การระบุชื่อผู้รับผิดชอบจริง*
+
+| บทบาทตามแผนภาพ | สิ่งที่ส่งมอบ | Branch ที่เกี่ยวข้อง |
+| --- | --- | --- |
+| UX/UI Frontend | หน้าเว็บ, Bootstrap, JavaScript | `Frontend` |
+| Flask Backend | Authentication, API, Database, Logging | `Backend` |
+| AI Engineer | Image Generation/Editing, Model/LoRA, API tests, Queue | `AiEngine` |
+| QA / DevOps | ทดสอบระบบ, คู่มือ, Deployment, Dashboard, Backup | `QA` |
+| Reverse Proxy / Routing | Nginx, การส่งต่อคำขอและการเชื่อมเครือข่าย; ช่วยส่วนอื่นตามความเหมาะสม | `Routing` |
+
+บทบาทเหล่านี้เป็นการแบ่งงานพัฒนา ไม่ได้หมายความว่าต้องใช้คอมพิวเตอร์หนึ่งเครื่องต่อสมาชิกหนึ่งคน
+
+![ทางเลือกจำนวนเครื่องจากเอกสารต้นฉบับ](docs/images/infrastructure/deployment-options.png)
+
+*ภาพที่ 3: โครงการนี้ใช้รูปฝั่งซ้าย — 3 เครื่องและ SQLite อยู่กับ Flask ส่วนรูปฝั่งขวาเป็นตัวอย่างทางเลือก 4 เครื่องที่แยก PostgreSQL ซึ่งไม่ได้ใช้ใน deployment นี้*
+
+ดูขั้นตอนตรวจเครือข่ายและเปิดบริการใน [คู่มือระบบ 3 เครื่อง](docs/PROJECTLUMA_3PC_TEST_GUIDE.md)
+
 ## เริ่มใช้งานบน Windows
 
 ต้องมี Python; Node.js ใช้ตรวจ frontend และ Docker ใช้กับ Compose CI ใช้ Python 3.12 และ Node.js 22
