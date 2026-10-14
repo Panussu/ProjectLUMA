@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 from fastapi.exceptions import RequestValidationError
@@ -24,10 +25,13 @@ def error_response(code: str, message: str, status: int) -> JSONResponse:
 def parse_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be an integer.")
-    try:
+    # Reject fractional values instead of silently truncating them.
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[+-]?[0-9]+", value.strip()):
         parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer.") from exc
+    else:
+        raise ValueError(f"{name} must be an integer.")
     if not minimum <= parsed <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}.")
     return parsed
@@ -35,7 +39,9 @@ def parse_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
 
 # เตรียมข้อความคำสั่งและตรวจความยาวก่อนส่งเข้ากระบวนการภาพ
 def parse_prompt(value: Any) -> str:
-    prompt = str(value or "").strip()
+    if not isinstance(value, str):
+        raise ValueError("Prompt must be a string.")
+    prompt = value.strip()
     if not 3 <= len(prompt) <= MAX_PROMPT_LENGTH:
         raise ValueError("Prompt must contain between 3 and 1000 characters.")
     return prompt
@@ -154,13 +160,7 @@ class GenerateRequest(BaseModel):
     def validate_clip_skip(cls, value: Any) -> int | None:
         if value in (None, ""):
             return None
-        try:
-            val = int(value)
-        except (ValueError, TypeError) as exc:
-            raise ValueError("clip_skip must be an integer.") from exc
-        if not 1 <= val <= 12:
-            raise ValueError("clip_skip must be between 1 and 12.")
-        return val
+        return parse_integer(value, "clip_skip", 1, 12)
 
     @field_validator("style_preset", mode="before")
     @classmethod
