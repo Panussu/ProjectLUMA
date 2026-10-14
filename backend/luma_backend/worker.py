@@ -186,8 +186,16 @@ def process_job(app: Flask, job_id: str) -> None:
 def post_with_queue_retry(url: str, app: Flask, **kwargs):
     max_retries = int(app.config.get("AI_QUEUE_MAX_RETRIES", 0))
     retry_delay = float(app.config.get("AI_QUEUE_RETRY_DELAY", 1))
+    # จดตำแหน่งไฟล์เพื่อส่งข้อมูลภาพเดิมครบทุกครั้งที่ลองใหม่
+    streams = []
+    for value in kwargs.get("files", {}).values():
+        stream = value[1] if isinstance(value, tuple) else value
+        if hasattr(stream, "seek") and hasattr(stream, "tell"):
+            streams.append((stream, stream.tell()))
     response = None
     for attempt in range(max_retries + 1):
+        for stream, position in streams:
+            stream.seek(position)
         response = requests.post(url, **kwargs)
         if response.status_code != 429 or attempt >= max_retries:
             return response

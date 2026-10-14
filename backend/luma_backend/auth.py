@@ -5,6 +5,7 @@ import re
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import BadRequest
 
 from .extensions import db
 from .models import User
@@ -19,14 +20,23 @@ def error_response(code: str, message: str, status: int):
 
 def credentials_from_request() -> tuple[str, str]:
     data = request.get_json(silent=True) or {}
-    username = str(data.get("username", "")).strip().casefold()
-    password = str(data.get("password", ""))
+    # ปฏิเสธ JSON ที่ไม่ใช่ออบเจ็กต์และ credentials ที่ไม่ใช่ข้อความ
+    if not isinstance(data, dict):
+        raise BadRequest("Credentials must be a JSON object.")
+    username = data.get("username", "")
+    password = data.get("password", "")
+    if not isinstance(username, str) or not isinstance(password, str):
+        raise BadRequest("Username and password must be strings.")
+    username = username.strip().casefold()
     return username, password
 
 
 @auth_blueprint.post("/register")
 def register():
-    username, password = credentials_from_request()
+    try:
+        username, password = credentials_from_request()
+    except BadRequest as exc:
+        return error_response("validation_error", exc.description, 400)
     if not USERNAME_PATTERN.fullmatch(username):
         return error_response("validation_error", "Username must be 3-40 characters using letters, numbers, _, ., or -.", 400)
     if not 8 <= len(password) <= 128:
@@ -47,7 +57,10 @@ def register():
 
 @auth_blueprint.post("/login")
 def login():
-    username, password = credentials_from_request()
+    try:
+        username, password = credentials_from_request()
+    except BadRequest as exc:
+        return error_response("validation_error", exc.description, 400)
     user = db.session.scalar(db.select(User).where(User.username == username))
     if user is None or not user.check_password(password):
         return error_response("invalid_credentials", "The username or password is incorrect.", 401)
