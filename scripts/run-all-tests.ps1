@@ -1,65 +1,42 @@
-# PowerShell QA Automated Execution Script for ProjectLUMA
+# Run all automated checks and return a failing exit code when any check fails.
 [CmdletBinding()]
 param()
-
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-
-Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " ProjectLUMA - Automated QA Test Suite Runner" -ForegroundColor Cyan
-Write-Host "==========================================================" -ForegroundColor Cyan
-
 $passed = $true
 
-# Step 1: Run Pytest
-Write-Host "`n[STEP 1/3] Running Python Pytest Suite..." -ForegroundColor Yellow
+# Prefer the project environment so installed dependencies match the application.
+$pythonPath = Join-Path $repoRoot "backend/.venv/Scripts/python.exe"
+if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
+
+function Invoke-Check {
+    param([string]$Name, [string]$Executable, [string[]]$Arguments)
+    Write-Host "Checking $Name..."
+    try {
+        & $Executable @Arguments
+        if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
+        Write-Host "[PASS] $Name"
+    } catch {
+        # Missing programs must fail the checks instead of reusing a stale exit code.
+        Write-Host "[FAIL] $Name : $_" -ForegroundColor Red
+        $script:passed = $false
+    }
+}
+
 Push-Location $repoRoot
 try {
-    python -m pytest --tb=short
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[PASS] Pytest test suite executed successfully!" -ForegroundColor Green
-    } else {
-        Write-Host "[FAIL] Pytest test suite failed (Exit code: $LASTEXITCODE)." -ForegroundColor Red
-        $passed = $false
-    }
+    Invoke-Check -Name "Python tests" -Executable $pythonPath -Arguments @("-m", "pytest", "--tb=short")
+    Invoke-Check -Name "JavaScript syntax" -Executable "node" -Arguments @("--check", "frontend/assets/app.js")
+    Invoke-Check -Name "Frontend tests" -Executable "node" -Arguments @("--test", "tests/test_frontend.cjs")
+    Invoke-Check -Name "Compose configuration" -Executable "docker" -Arguments @("compose", "config", "--quiet")
 } finally {
     Pop-Location
 }
 
-# Step 2: Check JS Syntax
-Write-Host "`n[STEP 2/3] Checking Frontend JavaScript Syntax..." -ForegroundColor Yellow
-$appJsPath = Join-Path $repoRoot "frontend\assets\app.js"
-if (Test-Path $appJsPath) {
-    node --check $appJsPath
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[PASS] Frontend app.js syntax check passed!" -ForegroundColor Green
-    } else {
-        Write-Host "[FAIL] JavaScript syntax error detected." -ForegroundColor Red
-        $passed = $false
-    }
-} else {
-    Write-Host "[SKIP] frontend/assets/app.js not found in current branch workspace." -ForegroundColor Gray
+# Automated checks do not establish real GPU or deployment readiness.
+if (-not $passed) {
+    Write-Host "Checks failed. Review the errors above." -ForegroundColor Red
+    exit 1
 }
-
-# Step 3: Check Docker Compose Config
-Write-Host "`n[STEP 3/3] Validating Docker Compose Configuration..." -ForegroundColor Yellow
-Push-Location $repoRoot
-try {
-    docker compose config --quiet
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[PASS] Docker compose configuration is valid!" -ForegroundColor Green
-    } else {
-        Write-Host "[FAIL] Docker compose configuration error." -ForegroundColor Red
-        $passed = $false
-    }
-} finally {
-    Pop-Location
-}
-
-Write-Host "`n==========================================================" -ForegroundColor Cyan
-if ($passed) {
-    Write-Host " [QA RESULT] ALL CHECKS PASSED - READY FOR PRODUCTION / DEMO 🏆" -ForegroundColor Green
-} else {
-    Write-Host " [QA RESULT] CHECKS FAILED - PLEASE REVIEW LOGS ABOVE ❌" -ForegroundColor Red
-}
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "Automated checks passed. Live deployment still requires verification." -ForegroundColor Green
+exit 0
