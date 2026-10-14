@@ -2,7 +2,11 @@
 
 LUMA เป็นเว็บแอปสร้างและแก้ไขภาพ จัดการบัญชี งาน และรายการโปรด ผ่าน Flask Backend และ FastAPI AI Engine
 
-ปรับปรุงวันที่ 14 ตุลาคม 2026 อ้างอิง `main` ที่ `5b52b9e` ซึ่งรวม PR #2 และการแก้ไขความปลอดภัย session การตรวจสอบข้อมูล และการเปิดบริการล่าสุดแล้ว
+ปรับปรุงคู่มือวันที่ 14 ตุลาคม 2026 สำหรับโค้ดรวมบน `main` รวมขั้นตอนติดตั้ง ตั้งค่า เปิดบริการ และตรวจผล เพื่อให้ผู้ตรวจดาวน์โหลดไปรันตามได้ตามข้อกำหนดการส่งโครงงานข้อ 2
+
+**ลิงก์โครงงาน:** https://github.com/Panussu/ProjectLUMA
+
+เริ่มจาก [วิธีรันบน Windows](#เริ่มใช้งานบน-windows) หากไม่มี GPU ให้ใช้โหมดทดสอบในคู่มือนี้ ส่วน [เอกสารประกอบการส่ง](#เอกสารประกอบการส่งโครงงาน) มีรายงาน Word พร้อมภาพหลักฐาน
 
 ## ความสามารถและสถาปัตยกรรม
 
@@ -97,26 +101,142 @@ Configuration VLAN ปัจจุบันเป็น HTTP ไม่ได้�
 
 ## เริ่มใช้งานบน Windows
 
-ต้องมี Python; Node.js ใช้ตรวจ frontend และ Docker ใช้กับ Compose CI ใช้ Python 3.12 และ Node.js 22
+### 1 เตรียมเครื่องและดาวน์โหลดโปรเจกต์
 
-จาก root สร้างไฟล์ตั้งค่าเฉพาะเมื่อยังไม่มี:
+ต้องมี Git และ Python 3.12 โดยคำสั่ง `python` ต้องเรียก Python รุ่นที่ติดตั้งไว้ ตรวจด้วยคำสั่งด้านล่าง Node.js 22 จำเป็นเฉพาะเมื่อต้องการรันชุดทดสอบ Frontend ส่วน Docker Desktop และ Forge ไม่จำเป็นสำหรับวิธีทดสอบด้วย CPU
+
+```powershell
+git --version
+python --version
+git clone https://github.com/Panussu/ProjectLUMA.git
+Set-Location ProjectLUMA
+```
+
+ให้รันคำสั่งถัดไปจากโฟลเดอร์ `ProjectLUMA` ที่มี `README.md`, `backend`, `ai-engine` และ `scripts` หากดาวน์โหลด ZIP จาก GitHub ให้แตกไฟล์แล้วเปิด PowerShell ที่โฟลเดอร์นี้แทนการ clone
+
+### 2 สร้างและแก้ไฟล์ตั้งค่า
+
+คัดลอกไฟล์ตัวอย่างเฉพาะเมื่อยังไม่มี เพื่อรักษาค่าที่ตั้งไว้เดิม:
 
 ```powershell
 if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 if (-not (Test-Path ai-engine/.env)) { Copy-Item ai-engine/.env.example ai-engine/.env }
 ```
 
-ก่อนเปิดบริการ ตั้ง `AI_SERVICE_TOKEN` เป็นค่าสุ่มเดียวกันทั้งสองบริการ และตั้ง Backend `SECRET_KEY` / `JWT_SECRET_KEY` เป็นค่าสุ่มแยกกันอย่างน้อย 32 ตัวอักษร ค่า example ถูกปฏิเสธสำหรับ private signed media หากไม่มี Forge ตั้ง `AI_PROVIDER=development-procedural` ใน `ai-engine/.env` เพราะ native example ใช้ Forge
+เปิดไฟล์ `backend/.env` และ `ai-engine/.env` ด้วยตัวแก้ไขข้อความ แล้วตั้งค่าตามตาราง ใช้คำสั่งนี้สร้างค่าสุ่ม 3 ครั้ง: ครั้งแรกใช้เป็นโทเคนร่วมทั้งสองบริการ อีกสองครั้งใช้เป็นกุญแจ Backend คนละค่า
 
-เปิดแต่ละคำสั่งใน PowerShell คนละหน้าต่าง:
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+| ไฟล์ | ค่า | สิ่งที่ต้องกำหนดสำหรับเครื่องเดียว |
+| --- | --- | --- |
+| `backend/.env` | `SECRET_KEY`, `JWT_SECRET_KEY` | ค่าสุ่มคนละค่า อย่างน้อย 32 ตัวอักษร |
+| ทั้งสองไฟล์ | `AI_SERVICE_TOKEN` | ค่าสุ่มเดียวกันทั้ง Backend และ AI Engine |
+| `backend/.env` | `AI_SERVICE_URL` | `http://127.0.0.1:8000` |
+| `backend/.env` | `CORS_ORIGINS` | `http://localhost:8080` |
+| `backend/.env` | `HOST`, `PORT` | `127.0.0.1`, `5000` |
+| `ai-engine/.env` | `HOST`, `PORT` | `127.0.0.1`, `8000` |
+| `ai-engine/.env` | `AI_PROVIDER` | `development-procedural` สำหรับทดสอบด้วย CPU |
+
+ไม่ต้องสร้าง SQLite เอง ระบบเตรียมฐานข้อมูลเริ่มต้นใน `backend/data/luma.db` เมื่อเปิด Backend ห้ามนำ `.env` หรือค่าลับขึ้น GitHub
+
+**โหมด CPU:** ใช้ `development-procedural` เพื่อตรวจการสมัครสมาชิก ส่งงาน รับภาพ และแก้ไขภาพพื้นฐาน ภาพมาจาก Pillow ไม่ใช่โมเดล Generative AI และความสามารถที่พึ่งพา Forge จะไม่เทียบเท่าโหมดจริง
+
+**โหมดโมเดลจริง:** ตั้ง `AI_PROVIDER=forge`, เปิด Forge พร้อมโมเดลและ `--api --port 7860` แล้วตั้ง `FORGE_URL=http://127.0.0.1:7860` ใน `ai-engine/.env` แก้ `MODELS_DIR` และ `LORAS_DIR` ให้ตรงกับเครื่องของตนเอง หากใช้ API authentication ให้ตั้ง `FORGE_USERNAME` และ `FORGE_PASSWORD` ด้วย ดู [คู่มือ AI Engine](ai-engine/README.md)
+
+### 3 เปิดบริการตามลำดับ
+
+เปิด PowerShell 3 หน้าต่าง โดยแต่ละหน้าต่างอยู่ที่โฟลเดอร์โครงงานเดียวกัน และปล่อยหน้าต่างบริการไว้ระหว่างใช้งาน
+
+**หน้าต่างที่ 1 เปิด AI Engine**
 
 ```powershell
 ./scripts/run-ai.ps1
+```
+
+รอจนบริการพร้อม แล้วเปิด `http://127.0.0.1:8000/health` หรือ `http://127.0.0.1:8000/docs` ได้ก่อนเริ่ม Backend หากใช้ Forge ต้องเปิด Forge ก่อนขั้นตอนนี้
+
+**หน้าต่างที่ 2 เปิด Backend**
+
+```powershell
 ./scripts/run-backend.ps1
+```
+
+รอให้เปิด `http://127.0.0.1:5000/api/v1/health` ได้ แล้วจึงเปิด Frontend
+
+**หน้าต่างที่ 3 เปิด Frontend**
+
+```powershell
 ./scripts/run-frontend.ps1
 ```
 
-สคริปต์ AI/Backend สร้าง virtual environment และติดตั้ง dependencies เปิด `http://localhost:8080` ซึ่งเรียก `http://127.0.0.1:5000/api/v1` ตรวจ `AI_SERVICE_URL=http://127.0.0.1:8000` และ `CORS_ORIGINS=http://localhost:8080` หากใช้ origin/hostname อื่นต้องตั้ง API address และ CORS ให้ตรงกัน Nginx ใช้ `/api/v1` บน origin เดียวกับหน้าเว็บ
+สคริปต์ AI/Backend จะสร้าง `.venv` แยกภายในแต่ละบริการและติดตั้ง dependencies ครั้งแรกต้องใช้อินเทอร์เน็ตและอาจใช้เวลานาน จากนั้นเปิด **http://localhost:8080** ในเบราว์เซอร์ ไม่เปิด `frontend/index.html` ด้วยการดับเบิลคลิกไฟล์
+
+### 4 ตรวจว่ารันได้และทดลองใช้งาน
+
+จาก PowerShell อีกหน้าต่าง ตรวจทั้งสามบริการ:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:5000/api/v1/health
+(Invoke-WebRequest http://localhost:8080 -UseBasicParsing).StatusCode
+```
+
+สองคำสั่งแรกควรได้ข้อมูล JSON โดยไม่เกิดข้อผิดพลาดการเชื่อมต่อ และคำสั่งสุดท้ายควรได้ `200` จากนั้นตรวจตามลำดับ:
+
+1. เปิดเว็บ กด **Sign in** และสมัครบัญชีใหม่ในหน้าต่างบัญชี แล้วเข้าสู่ระบบ
+2. ที่แท็บ **Generate** กรอก prompt เช่น `A red apple on a white table` ใช้ขนาด 512 × 512 และ steps 20 แล้วส่งงาน
+3. รอจนงานเป็น `completed` ตรวจว่ามีภาพผลลัพธ์และดาวน์โหลดภาพได้ หากเป็น `failed` ให้อ่านข้อความผิดพลาดและหน้าต่างบริการ
+4. ที่แท็บ **Edit image** เลือกภาพทดสอบ กรอกคำสั่งแก้ไข ส่งงาน และตรวจผลลัพธ์
+5. ทดลองดูประวัติงาน ออกจากระบบ และเข้าสู่ระบบใหม่เพื่อตรวจว่างานยังเป็นของบัญชีเดิม
+
+รายการข้างต้นเป็นเกณฑ์ตรวจหลังติดตั้ง ไม่ใช่การยืนยันว่าได้รัน Forge หรือเครือข่ายจริงของผู้อ่านแล้ว โหมด CPU เหมาะกับตรวจวงจรงาน ส่วนคุณภาพภาพจากโมเดลต้องตรวจในโหมด Forge
+
+### 5 หยุดบริการและแก้ปัญหาที่พบบ่อย
+
+กด `Ctrl+C` ในแต่ละหน้าต่างเพื่อหยุดบริการ การปิดหน้าต่าง Frontend อย่างเดียวไม่ได้หยุด Backend หรือ AI Engine
+
+| อาการ | ตรวจและแก้ไข |
+| --- | --- |
+| ไม่พบ `python` หรือ `git` | ตรวจการติดตั้งและ PATH แล้วเปิด PowerShell ใหม่ |
+| รันไฟล์ `.ps1` ไม่ได้ | ใช้วิธีรันด้วย Python ด้านล่าง โดยไม่ต้องเปลี่ยนนโยบาย PowerShell |
+| พอร์ต 5000, 8000 หรือ 8080 ถูกใช้ | ปิดบริการเดิมที่ตนเปิดไว้ หรือปรับพอร์ตและ URL ที่เกี่ยวข้องให้ตรงกัน |
+| หน้าเว็บแสดง Offline | ตรวจ Backend `/api/v1/health` และ AI `/health` แล้วดูข้อความในหน้าต่างบริการ |
+| AI ตอบ Unauthorized หรือ HTTP 401 | ตรวจ `AI_SERVICE_TOKEN` ให้ตรงกันทั้งสองไฟล์ แล้วเริ่มบริการใหม่ |
+| ใช้ signed media ไม่ได้ | เปลี่ยนกุญแจตัวอย่างเป็นค่าสุ่มจริงและเริ่ม Backend ใหม่ |
+| เรียก Forge ไม่ได้หรือได้ HTTP 502 | เปิด Forge พร้อม `--api` ตรวจ `FORGE_URL`, โมเดล และ API authentication หรือเลือกโหมด CPU เพื่อแยกทดสอบ |
+| เปิดผ่าน IP แล้ว API/CORS ไม่ผ่าน | วิธีเครื่องเดียวนี้ใช้ `http://localhost:8080`; หากเปลี่ยน origin ให้ตั้ง `CORS_ORIGINS` และ API address ให้ตรงกัน หรือใช้ Nginx ตามคู่มือสามเครื่อง |
+
+**วิธีรันโดยไม่ใช้สคริปต์ PowerShell:** จาก root เตรียม environment และ dependencies ครั้งเดียว:
+
+```powershell
+python -m venv ai-engine/.venv
+python -m venv backend/.venv
+./ai-engine/.venv/Scripts/python.exe -m pip install -r ai-engine/requirements.txt
+./backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
+```
+
+หลังตั้ง `.env` ตามขั้นตอน 2 แล้ว เปิดคนละหน้าต่างเช่นเดิม:
+
+```powershell
+# หน้าต่างที่ 1 เริ่มจาก root
+Set-Location ai-engine
+./.venv/Scripts/python.exe app.py
+```
+
+```powershell
+# หน้าต่างที่ 2 เริ่มจาก root
+Set-Location backend
+./.venv/Scripts/python.exe run.py
+```
+
+```powershell
+# หน้าต่างที่ 3 อยู่ที่ root
+python -m http.server 8080 --directory frontend
+```
+
+สำหรับระบบสามเครื่อง Nginx จะส่ง `/api/v1` บน origin เดียวกับหน้าเว็บ ใช้ [คู่มือสามเครื่อง](docs/PROJECTLUMA_3PC_TEST_GUIDE.md) และ [คู่มือ Deployment](docs/DEPLOYMENT.md) แทนค่าของวิธีเครื่องเดียว
 
 ## ตั้งค่าและ API
 
@@ -151,7 +271,7 @@ Production persist database/media/uploads และเปิด recovery หา�
 
 ระบบสามเครื่องใช้ PC 1 AI, PC 2 Nginx, PC 3 Backend ตรวจ IP จริงแล้วแก้ environment/Nginx/firewall ตาม [คู่มือสามเครื่อง](docs/PROJECTLUMA_3PC_TEST_GUIDE.md) ใช้ `0.0.0.0` เป็น listen address เท่านั้น
 
-## ผลทดสอบล่าสุด
+## วิธีรันทดสอบและผลตรวจที่บันทึกไว้
 
 รันจาก root:
 
@@ -166,12 +286,12 @@ node --test tests/test_frontend.cjs
 
 | การตรวจสอบ | ผล |
 | --- | --- |
-| Python รันซ้ำสำหรับ README ครั้งนี้ | 109 ผ่าน |
-| Frontend Node รันซ้ำครั้งนี้ | 15 ผ่าน |
+| Python ตามบันทึกตรวจ revision `5b52b9e` | 109 ผ่าน |
+| Frontend Node ตามบันทึกตรวจ revision `5b52b9e` | 15 ผ่าน |
 | HTTP/API ตาม audit ล่าสุด | 78 ผ่าน |
 | Chromium ตาม audit ล่าสุด | 53 ผ่าน |
 
-ดู [latest audit](docs/WEBAPP_AUDIT_2026-10-14.md) การทดสอบใช้ procedural provider และ fixtures ยังไม่ได้ยืนยัน real Forge/GPU, container build/runtime หรือสามเครื่องจริง HTTP/browser เป็นผลจาก audit ไม่ได้รันซ้ำในการแก้ README ครั้งนี้
+ดู [latest audit](docs/WEBAPP_AUDIT_2026-10-14.md) ตารางนี้เก็บผลที่บันทึกไว้ก่อนเพิ่มเอกสารส่งโครงงาน ไม่ได้รันชุดทดสอบแอปซ้ำในการปรับ README รอบนี้ การทดสอบดังกล่าวใช้ procedural provider และ fixtures ยังไม่ได้ยืนยัน real Forge/GPU, container build/runtime หรือสามเครื่องจริง
 
 ## Backup และเอกสาร
 
@@ -190,3 +310,11 @@ Restore เลือก ZIP ล่าสุดและขอยืนยัน 
 - [Overview site](project-overview-site/index.html), [code deep dive](project-overview-site/code-deep-dive.html)
 
 พัฒนาแยกบน `Frontend`, `Backend`, `AiEngine`, `Routing`, `QA` แล้วรวมผ่าน review branch/PR ก่อนเข้า `main`
+
+## เอกสารประกอบการส่งโครงงาน
+
+- [รายงาน Word ภาษาไทยพร้อมภาพหลักฐาน](docs/reports/LUMA_Visible_Bug_Report_TH.docx) — 23 หน้า ภาพประกอบ 12 ภาพ พร้อมขั้นตอนทำซ้ำ ผลที่พบ และแนวทางแก้ไข
+- [สรุปขอบเขตรายงาน](docs/reports/README.md) — อ่านเพื่อแยกเว็บที่ถูกตรวจออกจากโปรเจกต์นี้
+- [ผลตรวจ ProjectLUMA](docs/WEBAPP_AUDIT_2026-10-14.md) และ [คู่มือรันระบบสามเครื่อง](docs/PROJECTLUMA_3PC_TEST_GUIDE.md)
+
+รายงาน Word เป็นการตรวจเว็บภายนอก `boss2912/luma-webapp-g04` เมื่อวันที่ 14 ตุลาคม 2026 ประเด็นในเอกสารจึงไม่ใช่ผลยืนยันข้อผิดพลาดของ `Panussu/ProjectLUMA` มีประเด็นยืนยันจากหน้าจอ 7 รายการและข้อเสนอแนะ 1 รายการ โดยเหตุการณ์ 502 พบชั่วคราวหนึ่งครั้ง
