@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const defaultHost = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) ? "127.0.0.1:5000" : "172.20.56.162:5000";
+  const defaultHost = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) ? "127.0.0.1:5000" : `${window.location.hostname || "127.0.0.1"}:5000`;
   const BACKEND_HOST = (typeof window !== "undefined" && window.LUMA_BACKEND_HOST) || defaultHost;
   const API_BASE = (typeof window !== "undefined" && window.LUMA_API_BASE)
     || (typeof window !== "undefined" && window.location.protocol === "file:" ? `http://${BACKEND_HOST}/api/v1` : null)
@@ -43,22 +43,26 @@
   }
 
   async function api(path, options = {}) {
+    const authToken = state.token;
     const headers = new Headers(options.headers || {});
-    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
     if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
     const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
     const contentType = response.headers.get("content-type") || "";
     const data = contentType.includes("application/json") ? await response.json() : null;
     if (!response.ok) {
-      if (response.status === 401 && state.token) logout(false);
-      throw new Error(data?.error?.message || `Request failed (${response.status})`);
+      if (response.status === 401 && authToken && state.token === authToken) logout(false);
+      const error = new Error(data?.error?.message || `Request failed (${response.status})`);
+      error.status = response.status;
+      throw error;
     }
     return data;
   }
 
   async function apiBlob(path, options = {}) {
+    const authToken = state.token;
     const headers = new Headers(options.headers || {});
-    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
     const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
     if (!response.ok) {
       let errMsg = `Request failed (${response.status})`;
@@ -666,6 +670,21 @@
   }
 
   function logout(notify = true) {
+    state.activeJobId = null;
+    stopPolling();
+    setGeneratingState(false);
+    state.activeJob = null;
+    state.activeImageUrl = null;
+    for (const url of Object.values(state.filterCache)) {
+      if (typeof url === "string" && url.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
+    state.filterCache = {};
+    state.currentFilter = "original";
+    $("#resultImage")?.removeAttribute("src");
+    $("#downloadButton")?.removeAttribute("href");
+    $("#resultView")?.classList.add("d-none");
+    $("#jobProgress")?.classList.add("d-none");
+    $("#emptyResult")?.classList.remove("d-none");
     state.token = null;
     state.user = null;
     localStorage.removeItem(TOKEN_KEY);
@@ -742,8 +761,8 @@
     const editIcon = $("#editBtnIcon");
 
     if (genBtn) {
-      // NOTE: Button remains clickable so user can press again to interrupt!
-      genBtn.disabled = false;
+      // Allow interruption only after the server has assigned a job ID.
+      genBtn.disabled = isBusy && !state.activeJobId;
       if (isBusy) {
         genBtn.classList.add("btn-interrupting");
         genBtn.title = "Click again to interrupt this process";
@@ -766,7 +785,7 @@
     }
 
     if (editBtn) {
-      editBtn.disabled = false;
+      editBtn.disabled = isBusy && !state.activeJobId;
       if (isBusy) {
         editBtn.classList.add("btn-interrupting");
         editBtn.title = "Click again to interrupt this process";
@@ -880,6 +899,9 @@
     $("#jobLivePreviewContainer")?.classList.add("d-none");
     $("#resultView")?.classList.remove("d-none");
 
+    for (const url of Object.values(state.filterCache)) {
+      if (typeof url === "string" && url.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
     state.activeJob = job;
     state.activeImageUrl = mediaUrl(job.result_url);
     state.filterCache = { original: state.activeImageUrl };
@@ -898,59 +920,32 @@
   }
 
   async function interruptCurrentGeneration() {
-    if (!state.isGenerating) return;
+    const jobId = state.activeJobId;
+    const sessionToken = state.token;
+    if (!state.isGenerating || !jobId) return;
     showToast("Interrupting generation process...");
-
-    // Immediate tactile feedback on button
-    const genText = $("#generateBtnText");
-    if (genText) genText.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Interrupting...';
-    const editText = $("#editBtnText");
-    if (editText) editText.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Interrupting...';
-
-    const interruptedJobId = state.activeJobId;
     stopPolling();
-
+    // Invalidate an in-flight poll before awaiting the cancellation response.
+    state.activeJobId = null;
     try {
-      await api("/interrupt", {
-        method: "POST",
-        body: JSON.stringify({ job_id: interruptedJobId })
-      });
+      await api(`/jobs/${jobId}/cancel`, { method: "POST" });
+      if (state.token !== sessionToken) return;
+      setGeneratingState(false);
+      $("#jobProgress")?.classList.add("d-none");
+      $("#emptyResult")?.classList.remove("d-none");
       showToast("Generation process was interrupted.");
-    } catch (err) {
-      console.warn("Interrupt request notice:", err);
+      loadJobs();
+    } catch (error) {
+      showToast(error.message);
+      // A failed cancellation must not hide a job that is still running.
+      if (state.token && state.token === sessionToken) await pollJob(jobId);
     }
-
-    if (interruptedJobId) {
-      try {
-        await api(`/jobs/${interruptedJobId}/cancel`, { method: "POST" });
-      } catch {
-        // Ignore fallback
-      }
-    }
-
-    setGeneratingState(false);
-    const statusText = $("#jobStatusText");
-    if (statusText) statusText.textContent = "Generation interrupted";
-    const stepText = $("#jobStepText");
-    if (stepText) stepText.textContent = "Stopped by user";
-    const etaText = $("#jobEtaText");
-    if (etaText) etaText.textContent = "";
-    $("#jobLivePreviewContainer")?.classList.add("d-none");
-
-    // Immediately reload history so interrupted job displays right away
-    loadJobs();
-
-    setTimeout(() => {
-      if (!state.isGenerating && !state.activeImageUrl) {
-        $("#jobProgress")?.classList.add("d-none");
-        $("#emptyResult")?.classList.remove("d-none");
-      }
-    }, 1800);
   }
 
   async function pollJob(jobId) {
     stopPolling();
     state.activeJobId = jobId;
+    setGeneratingState(true);
     let busy = false;
     const check = async () => {
       if (busy || state.activeJobId !== jobId) return false;
@@ -980,6 +975,9 @@
         }
         return true;
       } catch (error) {
+        if (state.activeJobId !== jobId) return false;
+        // Keep tracking an accepted job through temporary network/server outages.
+        if (state.token && ![401, 404].includes(error.status)) return true;
         stopPolling();
         state.activeJobId = null;
         setGeneratingState(false);
@@ -1027,10 +1025,12 @@
       payload.model = selectedModel;
     }
 
+    const sessionToken = state.token;
     setGeneratingState(true, "Generating image...");
 
     try {
       const { job } = await api("/jobs/generate", { method: "POST", body: JSON.stringify(payload) });
+      if (state.token !== sessionToken) return;
       showJobProgress(job);
       pollJob(job.id);
     } catch (error) {
@@ -1126,10 +1126,12 @@
     if (sampler) data.append("sampler", sampler);
     if (scheduler) data.append("scheduler", scheduler);
 
+    const sessionToken = state.token;
     setGeneratingState(true, "Editing image...");
 
     try {
       const { job } = await api("/jobs/edit", { method: "POST", body: data });
+      if (state.token !== sessionToken) return;
       showJobProgress(job);
       pollJob(job.id);
     } catch (error) {
@@ -1144,6 +1146,7 @@
 
   async function applyFilter(operation) {
     if (!state.activeImageUrl) return;
+    const sourceUrl = state.activeImageUrl;
 
     // Update active highlight on little boxes
     document.querySelectorAll(".filter-little-box").forEach((btn) => {
@@ -1183,6 +1186,7 @@
         body: formData,
       });
 
+      if (state.activeImageUrl !== sourceUrl) return;
       const filteredUrl = URL.createObjectURL(filteredBlob);
       state.filterCache[operation] = filteredUrl;
 
@@ -1211,6 +1215,7 @@
       return;
     }
 
+    const sourceUrl = state.activeImageUrl;
     const upscaler = $("#upscalerSelect")?.value || "R-ESRGAN 4x+";
     const scaleFactor = $("#upscaleFactorSelect")?.value || "2.0";
     const upscaleBtn = $("#quickUpscaleBtn");
@@ -1234,6 +1239,7 @@
         body: formData,
       });
 
+      if (state.activeImageUrl !== sourceUrl) return;
       const upscaledUrl = URL.createObjectURL(upscaledBlob);
       state.filterCache[`upscale_${scaleFactor}x_${upscaler}`] = upscaledUrl;
       $("#resultImage").src = upscaledUrl;
@@ -1316,8 +1322,10 @@
 
   async function loadJobs() {
     if (!state.token) return;
+    const sessionToken = state.token;
     try {
       const data = await api("/jobs?limit=24");
+      if (state.token !== sessionToken) return;
       renderJobs(data.jobs);
     } catch (error) {
       showToast(error.message);
@@ -2173,6 +2181,8 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       showJobProgress,
+      logout,
+      setGeneratingState,
       setAuthenticated,
       state,
       api,
