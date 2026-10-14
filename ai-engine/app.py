@@ -662,7 +662,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 raise ValueError("The input image has too many pixels.")
         except ApiError:
             raise
-        except (ValueError, UnidentifiedImageError) as exc:
+        except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
         with queue_manager.acquire(timeout=float(config["QUEUE_TIMEOUT_SECONDS"])) as job_stats:
@@ -736,7 +736,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 raise ValueError(f"Upscaling by {scale}x would exceed maximum allowable dimensions (4096px).")
         except ApiError:
             raise
-        except (ValueError, UnidentifiedImageError) as exc:
+        except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
         effective_upscaler = (upscaler or config.get("FORGE_UPSCALER") or "R-ESRGAN 4x+").strip()
@@ -806,8 +806,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
             if not 0 <= strength <= 1:
                 raise ValueError("Strength must be between 0 and 1.")
             seed = prompt_seed(parsed_prompt, seed_value)
-            cfg_scale = float(cfg_scale_value) if cfg_scale_value not in (None, "") else None
-            clip_skip = int(clip_skip_value) if clip_skip_value not in (None, "") else None
+            cfg_scale = GenerateRequest.validate_cfg_scale(cfg_scale_value)
+            clip_skip = GenerateRequest.validate_clip_skip(clip_skip_value)
             parsed_loras = None
             if loras:
                 try:
@@ -826,7 +826,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
                 raise ValueError("The input image has too many pixels.")
         except ApiError:
             raise
-        except (ValueError, UnidentifiedImageError) as exc:
+        except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
             raise ApiError("validation_error", str(exc) or "The uploaded file is not a valid image.", 400) from exc
 
         effective_prompt, _, effective_sampler, effective_sched, effective_cfg, effective_clip, _, matched_style = apply_style_preset(
@@ -985,9 +985,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> FastAPI:
 
         try:
             with Image.open(io.BytesIO(file_bytes)) as source_image:
+                if source_image.width * source_image.height > 4_194_304:
+                    raise ValueError("The input image has too many pixels.")
                 source_image.load()
                 result_image = process_filter_image(source_image, op)
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise ApiError("validation_error", f"ไม่สามารถอ่านหรือประมวลผลภาพนี้ได้: {exc}", 400) from exc
 
         output = io.BytesIO()
